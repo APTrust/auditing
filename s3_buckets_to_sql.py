@@ -5,13 +5,13 @@ Lists all keys in the specified bucket, along with each key's metadata.
 Saves it all into a sqlite3 database.
 """
 
+import os
 import sqlite3
 import sys
 from boto.s3.connection import S3Connection
 
 
-def list_bucket(bucket_name):
-    conn = sqlite3.connect('aptrust_s3.db')
+def list_bucket(bucket_name, conn):
     create_db_if_necessary(conn)
     s3 = S3Connection()
     bucket = s3.get_bucket(bucket_name)
@@ -87,5 +87,9 @@ def create_db_if_necessary(conn):
     c.close()
 
 if __name__ == "__main__":
-    list_bucket('aptrust.preservation.storage')
-    list_bucket('aptrust.preservation.oregon')
+    if not os.path.exists('db'):
+        os.mkdir('db')
+    conn = sqlite3.connect('db/aptrust_s3.db')
+    list_bucket('aptrust.preservation.storage', conn)
+    list_bucket('aptrust.preservation.oregon', conn)
+    conn.close()
