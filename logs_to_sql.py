@@ -46,40 +46,261 @@ def insert_record(conn, data):
         return -1
 
 def insert_ingest_record(conn, data):
-    pass
+    statement = """
+    insert into ingest_records(
+      error_message,
+      stage,
+      retry,
+      bucket_name,
+      key,
+      object_identifier,
+      size,
+      etag,
+      s3_file_last_modified,
+      created_at datetime default current_timestamp,
+      updated_at)
+    values(?,?,?,?,?,?,?,?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_fetch_result(conn, data):
-    pass
+    statement = """
+    insert into ingest_fetch_results(
+      ingest_record_id,
+      local_file,
+      remote_md5,
+      local_md5,
+      md5_verified,
+      md5_verifiable,
+      error_message,
+      warning,
+      retry,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?,?,?,?,?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_tar_result(conn, data):
-    pass
+    statement = """
+    insert into ingest_tar_results(
+      ingest_record_id,
+      input_file,
+      output_dir,
+      error_message,
+      warnings,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_unpacked_files(conn, data):
-    pass
+    statement = """
+    insert into ingest_unpacked_files(
+      ingest_tar_result_id,
+      file_path,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_generic_files(conn, data):
-    pass
+    statement = """
+    insert into ingest_generic_files(
+      ingest_tar_result_id,
+      file_path,
+      size,
+      file_created,
+      file_modified,
+      md5,
+      md5_verified,
+      sha256,
+      sha256_generated,
+      uuid,
+      uuid_generated,
+      mime_type,
+      error_message,
+      storage_url,
+      stored_at,
+      storage_md5,
+      identifier,
+      existing_file,
+      needs_save,
+      replication_error,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_bag_read_result(conn, data):
-    pass
+    statement = """
+    insert into ingest_bag_read_results(
+      ingest_record_id,
+      bag_path,
+      error_message,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_bag_read_files(conn, data):
-    pass
+    statement = """
+    insert into ingest_bag_read_files(
+      ingest_bag_read_result_id,
+      file_path,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_checksum_errors(conn, data):
-    pass
+    statement = """
+    insert into ingest_checksum_errors(
+      ingest_bag_read_result_id,
+      error_message,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_tags(conn, data):
-    pass
+    statement = """
+    insert into ingest_tags(
+      ingest_bag_read_result_id,
+      label text,
+      value text,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_fedora_result(conn, data):
-    pass
+    statement = """
+    insert into ingest_fedora_results(
+      ingest_record_id int not null,
+      object_identifier text,
+      is_new_object bool,
+      error_message text,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_fedora_generic_files(conn, data):
-    pass
+    statement = """
+    insert into ingest_fedora_results(
+      ingest_fedora_result_id,
+      file_path,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def insert_fedora_metadata(conn, data):
-    pass
+    statement = """
+    insert into ingest_fedora_metadata(
+      ingest_fedora_result_id,
+      record_type,
+      action,
+      event_object,
+      error_message,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?,?,?,?)
+    """
+    lastrow_id = -1
+    try:
+        conn.execute(statement, ())
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+    return lastrow_id
 
 def initialize_db(conn):
     """
@@ -108,7 +329,7 @@ def initialize_db(conn):
         conn.execute(statement)
         conn.commit()
 
-        print("Creating table ingest_fetch_result")
+        print("Creating table ingest_fetch_results")
         statement = """create table ingest_fetch_results(
         id integer primary key autoincrement,
         ingest_record_id int not null,
@@ -155,7 +376,6 @@ def initialize_db(conn):
         print("Creating table ingest_generic_files")
         statement = """create table ingest_generic_files(
         id integer primary key autoincrement,
-        ingest_record_id int not null,
         ingest_tar_result_id int not null,
         file_path text,
         size int,
@@ -222,7 +442,6 @@ def initialize_db(conn):
         print("Creating table ingest_tags")
         statement = """create table ingest_tags(
         id integer primary key autoincrement,
-        ingest_record_id int not null,
         ingest_bag_read_result_id int not null,
         label text,
         value text,
