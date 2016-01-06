@@ -10,7 +10,81 @@ import sys
 
 # http://stackoverflow.com/questions/15856976/transactions-with-python-sqlite3
 
-def ensure_tables_exist(conn):
+def record_exists(conn, etag, bucket_name, key, s3_file_last_modified):
+    """
+    Returns true if the ingest record exists.
+    """
+    # run exists query by natural key
+    pass
+
+def insert_record(conn, data):
+    """
+    Adds a record to the database. Returns 0 if the record already exists,
+    1 if the record was inserted, and -1 if the insert transaction failed.
+    """
+    if record_exists():
+        return 0
+    try:
+        conn.execute("begin")
+        insert_ingest_record(conn, data)
+        insert_fetch_result(conn, data)
+        insert_tar_result(conn, data)
+        insert_unpacked_files(conn, data)
+        insert_generic_files(conn, data)
+        insert_bag_read_result(conn, data)
+        insert_bag_read_files(conn, data)
+        insert_checksum_errors(conn, data)
+        insert_tags(conn, data)
+        insert_fedora_result(conn, data)
+        insert_fedora_generic_files(conn, data)
+        insert_fedora_metadata(conn, data)
+        conn.execute("commit")
+        return 1
+    except conn.Error:
+        print("Insert failed")
+        conn.execute("rollback")
+        return -1
+
+def insert_ingest_record(conn, data):
+    pass
+
+def insert_fetch_result(conn, data):
+    pass
+
+def insert_tar_result(conn, data):
+    pass
+
+def insert_unpacked_files(conn, data):
+    pass
+
+def insert_generic_files(conn, data):
+    pass
+
+def insert_bag_read_result(conn, data):
+    pass
+
+def insert_bag_read_files(conn, data):
+    pass
+
+def insert_checksum_errors(conn, data):
+    pass
+
+def insert_tags(conn, data):
+    pass
+
+def insert_fedora_result(conn, data):
+    pass
+
+def insert_fedora_generic_files(conn, data):
+    pass
+
+def insert_fedora_metadata(conn, data):
+    pass
+
+def initialize_db(conn):
+    """
+    Creates the database tables and indexes if they don't already exist.
+    """
     query = """SELECT name FROM sqlite_master WHERE type='table'
     AND name='ingest_records'"""
     c = conn.cursor()
@@ -104,7 +178,6 @@ def ensure_tables_exist(conn):
         replication_error text,
         created_at datetime default current_timestamp,
         updated_at datetime default current_timestamp,
-        FOREIGN KEY(ingest_record_id) REFERENCES ingest_records(id),
         FOREIGN KEY(ingest_tar_result_id)
         REFERENCES ingest_tar_results(id))"""
         conn.execute(statement)
@@ -155,7 +228,6 @@ def ensure_tables_exist(conn):
         value text,
         created_at datetime default current_timestamp,
         updated_at datetime default current_timestamp,
-        FOREIGN KEY(ingest_record_id) REFERENCES ingest_records(id),
         FOREIGN KEY(ingest_bag_read_result_id)
         REFERENCES ingest_bag_read_results(id))"""
         conn.execute(statement)
@@ -202,9 +274,9 @@ def ensure_tables_exist(conn):
         conn.commit()
 
         # Natural key for items in receiving buckets
-        print("Creating index ix_etag_bucket_key on ingest_records")
-        statement = """create index ix_etag_bucket_key on
-        ingest_records(etag, bucket_name, key)"""
+        print("Creating index ix_etag_bucket_key_date on ingest_records")
+        statement = """create index ix_etag_bucket_key_date on
+        ingest_records(etag, bucket_name, key, s3_file_last_modified)"""
         conn.execute(statement)
         conn.commit()
 
@@ -215,11 +287,81 @@ def ensure_tables_exist(conn):
         conn.execute(statement)
         conn.commit()
 
+        # Foreign key indexes
+        print("Creating index ix_ingest_fetch_results_fk1")
+        statement = """create index ix_ingest_fetch_results_fk1 on
+        ingest_fetch_results(ingest_record_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_ingest_tar_results_fk1")
+        statement = """create index ix_ingest_tar_results_fk1 on
+        ingest_tar_results(ingest_record_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_ingest_unpacked_files_fk1")
+        statement = """create index ix_ingest_unpacked_files_fk1 on
+        ingest_unpacked_files(ingest_tar_result_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_ingest_generic_files_fk1")
+        statement = """create index ix_ingest_generic_files_fk1 on
+        ingest_generic_files(ingest_tar_result_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_ingest_bag_read_results_fk1")
+        statement = """create index ix_ingest_bag_read_results_fk1 on
+        ingest_bag_read_results(ingest_record_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_ingest_bag_read_files_fk1")
+        statement = """create index ix_ingest_bag_read_files_fk1 on
+        ingest_bag_read_files(ingest_bag_read_result_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_ingest_checksum_errors_fk1")
+        statement = """create index ix_ingest_checksum_errors_fk1 on
+        ingest_checksum_errors(ingest_bag_read_result_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_ingest_tags_fk1")
+        statement = """create index ix_ingest_tags_fk1 on
+        ingest_tags(ingest_bag_read_result_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_fedora_results_fk1")
+        statement = """create index ix_fedora_results_fk1 on
+        ingest_fedora_results(ingest_record_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_fedora_generic_files_fk1")
+        statement = """create index ix_fedora_generic_files_fk1 on
+        ingest_fedora_generic_files(ingest_fedora_result_id)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating index ix_fedora_metadata_fk1")
+        statement = """create index ix_fedora_metadata_fk1 on
+        ingest_fedora_metadata(ingest_fedora_result_id)"""
+        conn.execute(statement)
+        conn.commit()
+
     c.close()
 
 if __name__ == "__main__":
     if not os.path.exists('db'):
         os.mkdir('db')
     conn = sqlite3.connect('db/aptrust_logs.db')
-    ensure_tables_exist(conn)
+    # Turn OFF automatic transactions, because we want to
+    # manage these manually.
+    conn.isolation_level = None
+    initialize_db(conn)
     conn.close()
