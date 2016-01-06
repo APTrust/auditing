@@ -4,6 +4,7 @@
 Imports JSON data from the apt_record.json log into a SQLite DB.
 Specifically, this imports intellectual object and generic file data.
 """
+import datetime
 import os
 import sqlite3
 import sys
@@ -26,24 +27,35 @@ def insert_record(conn, data):
         return 0
     try:
         conn.execute("begin")
-        insert_ingest_record(conn, data)
-        insert_fetch_result(conn, data)
-        insert_tar_result(conn, data)
-        insert_unpacked_files(conn, data)
-        insert_generic_files(conn, data)
-        insert_bag_read_result(conn, data)
-        insert_bag_read_files(conn, data)
-        insert_checksum_errors(conn, data)
-        insert_tags(conn, data)
-        insert_fedora_result(conn, data)
-        insert_fedora_generic_files(conn, data)
-        insert_fedora_metadata(conn, data)
+        ingest_record_id = insert_ingest_record(conn, data)
+        ingest_s3_file_id = insert_ingest_s3_file(conn, data, ingest_record_id)
+        # insert_fetch_result(conn, data)
+        # insert_tar_result(conn, data)
+        # insert_unpacked_files(conn, data)
+        # insert_generic_files(conn, data)
+        # insert_bag_read_result(conn, data)
+        # insert_bag_read_files(conn, data)
+        # insert_checksum_errors(conn, data)
+        # insert_tags(conn, data)
+        # insert_fedora_result(conn, data)
+        # insert_fedora_generic_files(conn, data)
+        # insert_fedora_metadata(conn, data)
         conn.execute("commit")
         return 1
-    except conn.Error:
+    except sqlite3.Error as err:
         print("Insert failed")
         conn.execute("rollback")
         return -1
+
+def do_insert(conn, statement, values):
+    try:
+        conn.execute(statement, *values)
+        lastrow_id = conn.lastrowid
+    except sqlite3.Error as err:
+        print(err)
+        print(statement, values)
+        raise err
+    return lastrow_id
 
 def insert_ingest_record(conn, data):
     statement = """
@@ -51,23 +63,48 @@ def insert_ingest_record(conn, data):
       error_message,
       stage,
       retry,
-      bucket_name,
-      key,
       object_identifier,
-      size,
-      etag,
-      s3_file_last_modified,
-      created_at datetime default current_timestamp,
+      created_at,
       updated_at)
-    values(?,?,?,?,?,?,?,?,?,?,?)
+    values(?,?,?,?,?,?)
     """
     lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    now = datetime.utcnow()
+    object_identifier = get_object_identifier(
+        data['S3File']['BucketName'],
+        data['S3File']['Key']['Key'])
+    values = (data['ErrorMessage'],
+              data['Stage'],
+              data['Retry'],
+              object_identifier,
+              now,
+              now)
+    return do_insert(conn, statement, values)
+
+def insert_s3_file(conn, data, ingest_record_id):
+    statement = """
+    insert into ingest_s3_files(
+      ingest_record_id,
+      bucket_name,
+      key,
+      size,
+      etag,
+      last_modified,
+      created_at,
+      updated_at
+    )
+    values(?,?,?,?,?,?,?,?,?,?,?)
+    """
+    now = datetime.utcnow()
+    values = (ingest_record_id,
+              data['S3File']['BucketName'],
+              data['S3File']['Key']['Key'],
+              data['S3File']['Key']['Size'],
+              data['S3File']['Key']['ETag'],
+              data['S3File']['Key']['LastModified'],
+              now,
+              now)
+    return do_insert(conn, statement, values)
 
 def insert_fetch_result(conn, data):
     statement = """
@@ -86,13 +123,8 @@ def insert_fetch_result(conn, data):
     )
     values(?,?,?,?,?,?,?,?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_tar_result(conn, data):
     statement = """
@@ -107,13 +139,8 @@ def insert_tar_result(conn, data):
     )
     values(?,?,?,?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_unpacked_files(conn, data):
     statement = """
@@ -125,13 +152,8 @@ def insert_unpacked_files(conn, data):
     )
     values(?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_generic_files(conn, data):
     statement = """
@@ -161,13 +183,8 @@ def insert_generic_files(conn, data):
     )
     values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_bag_read_result(conn, data):
     statement = """
@@ -180,13 +197,8 @@ def insert_bag_read_result(conn, data):
     )
     values(?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_bag_read_files(conn, data):
     statement = """
@@ -198,13 +210,8 @@ def insert_bag_read_files(conn, data):
     )
     values(?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_checksum_errors(conn, data):
     statement = """
@@ -216,13 +223,8 @@ def insert_checksum_errors(conn, data):
     )
     values(?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_tags(conn, data):
     statement = """
@@ -235,13 +237,8 @@ def insert_tags(conn, data):
     )
     values(?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_fedora_result(conn, data):
     statement = """
@@ -255,13 +252,8 @@ def insert_fedora_result(conn, data):
     )
     values(?,?,?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_fedora_generic_files(conn, data):
     statement = """
@@ -273,13 +265,8 @@ def insert_fedora_generic_files(conn, data):
     )
     values(?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def insert_fedora_metadata(conn, data):
     statement = """
@@ -294,13 +281,8 @@ def insert_fedora_metadata(conn, data):
     )
     values(?,?,?,?,?,?,?)
     """
-    lastrow_id = -1
-    try:
-        conn.execute(statement, ())
-        lastrow_id = conn.lastrowid
-    except sqlite3.Error as err:
-        print(err)
-    return lastrow_id
+    values = ()
+    return do_insert(conn, statement, values)
 
 def initialize_db(conn):
     """
@@ -318,14 +300,24 @@ def initialize_db(conn):
         error_message text,
         stage text,
         retry bool,
-        bucket_name text,
-        key text,
         object_identifier text,
-        size int,
-        etag text,
-        s3_file_last_modified datetime,
         created_at datetime default current_timestamp,
         updated_at datetime default current_timestamp)"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating table ingest_s3_files")
+        statement = """create table ingest_s3_files(
+        id integer primary key autoincrement,
+        ingest_record_id int not null,
+        bucket_name text,
+        key text,
+        size int,
+        etag text,
+        last_modified datetime,
+        created_at datetime default current_timestamp,
+        updated_at datetime default current_timestamp,
+        FOREIGN KEY(ingest_record_id) REFERENCES ingest_records(id))"""
         conn.execute(statement)
         conn.commit()
 
@@ -493,16 +485,22 @@ def initialize_db(conn):
         conn.commit()
 
         # Natural key for items in receiving buckets
-        print("Creating index ix_etag_bucket_key_date on ingest_records")
+        print("Creating index ix_etag_bucket_key_date on ingest_s3_files")
         statement = """create index ix_etag_bucket_key_date on
-        ingest_records(etag, bucket_name, key, s3_file_last_modified)"""
+        ingest_s3_files(etag, bucket_name, key, last_modified)"""
         conn.execute(statement)
         conn.commit()
 
-        # Index for easy name lookup
-        print("Creating index ix_key on ingest_records")
-        statement = """create index ix_key on
-        ingest_records(key)"""
+        # Index for easy tar file name lookup
+        print("Creating index ix_key on ingest_s3_files")
+        statement = """create index ix_key on ingest_s3_files(key)"""
+        conn.execute(statement)
+        conn.commit()
+
+        # Index for easy object identifier lookup
+        print("Creating index ix_obj_identifier on ingest_records")
+        statement = """create index ix_obj_identifier on
+        ingest_records(object_identifier)"""
         conn.execute(statement)
         conn.commit()
 
