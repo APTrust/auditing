@@ -29,12 +29,21 @@ def insert_record(conn, data):
         conn.execute("begin")
         ingest_record_id = insert_ingest_record(conn, data)
         ingest_s3_file_id = insert_ingest_s3_file(conn, data, ingest_record_id)
-        # insert_fetch_result(conn, data)
-        # insert_tar_result(conn, data)
-        # insert_unpacked_files(conn, data)
-        # insert_generic_files(conn, data)
-        # insert_bag_read_result(conn, data)
-        # insert_bag_read_files(conn, data)
+        insert_fetch_result(conn, data, ingest_record_id)
+        tar_result_id = insert_tar_result(conn, data, ingest_record_id)
+
+        for file_path in data['TarResult']['FilesUnpacked']:
+            insert_unpacked_files(conn, file_path, tar_result_id)
+
+        for generic_file in data['TarResult']['FilesUnpacked']:
+            insert_generic_files(conn, generic_file, tar_result_id)
+
+        bag_read_result_id = insert_bag_read_result(
+            conn, data, ingest_record_id)
+
+        for file_path in data['BagReadResult']['Files']:
+            insert_bag_read_files(conn, file_path, bag_read_result_id)
+
         # insert_checksum_errors(conn, data)
         # insert_tags(conn, data)
         # insert_fedora_result(conn, data)
@@ -106,7 +115,7 @@ def insert_s3_file(conn, data, ingest_record_id):
               now)
     return do_insert(conn, statement, values)
 
-def insert_fetch_result(conn, data):
+def insert_fetch_result(conn, data, ingest_record_id):
     statement = """
     insert into ingest_fetch_results(
       ingest_record_id,
@@ -123,10 +132,22 @@ def insert_fetch_result(conn, data):
     )
     values(?,?,?,?,?,?,?,?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (ingest_record_id,
+              data['FetchResult']['LocalFile'],
+              data['FetchResult']['RemoteMd5'],
+              data['FetchResult']['LocalMd5'],
+              data['FetchResult']['Md5Verified'],
+              data['FetchResult']['Md5Verifiable'],
+              data['FetchResult']['ErrorMessage'],
+              data['FetchResult']['Warning'],
+              data['FetchResult']['Retry'],
+              now,
+              now,
+    )
     return do_insert(conn, statement, values)
 
-def insert_tar_result(conn, data):
+def insert_tar_result(conn, data, ingest_record_id):
     statement = """
     insert into ingest_tar_results(
       ingest_record_id,
@@ -139,10 +160,18 @@ def insert_tar_result(conn, data):
     )
     values(?,?,?,?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (ingest_record_id,
+              data['TarResult']['InputFile'],
+              data['TarResult']['OutputDir'],
+              data['TarResult']['ErrorMessage'],
+              data['TarResult']['Warnings'],
+              now,
+              now,
+    )
     return do_insert(conn, statement, values)
 
-def insert_unpacked_files(conn, data):
+def insert_unpacked_files(conn, file_path, tar_result_id):
     statement = """
     insert into ingest_unpacked_files(
       ingest_tar_result_id,
@@ -152,10 +181,11 @@ def insert_unpacked_files(conn, data):
     )
     values(?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (tar_result_id, file_path, now, now)
     return do_insert(conn, statement, values)
 
-def insert_generic_files(conn, data):
+def insert_generic_files(conn, generic_file, tar_result_id):
     statement = """
     insert into ingest_generic_files(
       ingest_tar_result_id,
@@ -183,10 +213,34 @@ def insert_generic_files(conn, data):
     )
     values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (tar_result_id,
+              genericFile['Path'],
+              genericFile['Size'],
+              genericFile['Created'],
+              genericFile['Modified'],
+              genericFile['Md5'],
+              genericFile['Md5Verified'],
+              genericFile['Sha256'],
+              genericFile['Sha256Generated'],
+              genericFile['Uuid'],
+              genericFile['UuidGenerated'],
+              genericFile['MimeType'],
+              genericFile['ErrorMessage'],
+              genericFile['StorageURL'],
+              genericFile['StoredAt'],
+              genericFile['StorageMd5'],
+              genericFile['Identifier'],
+              genericFile['IdentifierAssigned'],
+              genericFile['ExistingFile'],
+              genericFile['NeedsSave'],
+              genericFile['ReplicationError'],
+              now,
+              now,
+    )
     return do_insert(conn, statement, values)
 
-def insert_bag_read_result(conn, data):
+def insert_bag_read_result(conn, data, ingest_record_id):
     statement = """
     insert into ingest_bag_read_results(
       ingest_record_id,
@@ -197,10 +251,16 @@ def insert_bag_read_result(conn, data):
     )
     values(?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (ingest_record_id,
+              data['BagReadResult']['Path'],
+              data['BagReadResult']['ErrorMessage'],
+              now,
+              now,
+          )
     return do_insert(conn, statement, values)
 
-def insert_bag_read_files(conn, data):
+def insert_bag_read_files(conn, file_path, bag_read_result_id):
     statement = """
     insert into ingest_bag_read_files(
       ingest_bag_read_result_id,
@@ -210,7 +270,8 @@ def insert_bag_read_files(conn, data):
     )
     values(?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (bag_read_result_id, file_path, now, now)
     return do_insert(conn, statement, values)
 
 def insert_checksum_errors(conn, data):
