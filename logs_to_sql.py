@@ -18,6 +18,8 @@ def import_json(file_path, conn):
     with open(file_path) as f:
         for line in f:
             line_number += 1
+            if line_number % 500 == 0:
+                print("Processed {0} lines".format(line_number))
             try:
                 data = json.loads(line)
             except ValueError as err:
@@ -60,42 +62,48 @@ def insert_record(conn, data):
     try:
         conn.execute("begin")
         ingest_record_id = insert_ingest_record(conn, data)
-        ingest_s3_file_id = insert_s3_file(conn, data, ingest_record_id)
-        insert_fetch_result(conn, data, ingest_record_id)
-        tar_result_id = insert_tar_result(conn, data, ingest_record_id)
 
-        if data['TarResult']['FilesUnpacked'] is not None:
-            for file_path in data['TarResult']['FilesUnpacked']:
-                insert_unpacked_files(conn, file_path, tar_result_id)
+        if data['FetchResult'] is not None:
+            ingest_s3_file_id = insert_s3_file(conn, data, ingest_record_id)
+            insert_fetch_result(conn, data, ingest_record_id)
 
-        if data['TarResult']['Files'] is not None:
-            for generic_file in data['TarResult']['Files']:
-                insert_generic_files(conn, generic_file, tar_result_id)
+        if data['TarResult'] is not None:
+            tar_result_id = insert_tar_result(conn, data, ingest_record_id)
 
-        bag_read_result_id = insert_bag_read_result(
-            conn, data, ingest_record_id)
+            if data['TarResult']['FilesUnpacked'] is not None:
+                for file_path in data['TarResult']['FilesUnpacked']:
+                    insert_unpacked_files(conn, file_path, tar_result_id)
 
-        if data['BagReadResult']['Files'] is not None:
-            for file_path in data['BagReadResult']['Files']:
-                insert_bag_read_files(conn, file_path, bag_read_result_id)
+            if data['TarResult']['Files'] is not None:
+                for generic_file in data['TarResult']['Files']:
+                    insert_generic_files(conn, generic_file, tar_result_id)
 
-        if data['BagReadResult']['ChecksumErrors'] is not None:
-            for checksum_error in data['BagReadResult']['ChecksumErrors']:
-                insert_checksum_errors(conn, checksum_error, bag_read_result_id)
+        if data['BagReadResult'] is not None:
+            bag_read_result_id = insert_bag_read_result(
+                conn, data, ingest_record_id)
 
-        if data['BagReadResult']['Tags'] is not None:
-            for tag in data['BagReadResult']['Tags']:
-                insert_tags(conn, tag, bag_read_result_id)
+            if data['BagReadResult']['Files'] is not None:
+                for file_path in data['BagReadResult']['Files']:
+                    insert_bag_read_files(conn, file_path, bag_read_result_id)
 
-        fedora_result_id = insert_fedora_result(conn, data, ingest_record_id)
+            if data['BagReadResult']['ChecksumErrors'] is not None:
+                for checksum_error in data['BagReadResult']['ChecksumErrors']:
+                    insert_checksum_errors(conn, checksum_error, bag_read_result_id)
 
-        if data['FedoraResult']['GenericFilePaths'] is not None:
-            for file_path in data['FedoraResult']['GenericFilePaths']:
-                insert_fedora_generic_files(conn, file_path, fedora_result_id)
+            if data['BagReadResult']['Tags'] is not None:
+                for tag in data['BagReadResult']['Tags']:
+                    insert_tags(conn, tag, bag_read_result_id)
 
-        if data['FedoraResult']['MetadataRecords'] is not None:
-            for metadata_obj in data['FedoraResult']['MetadataRecords']:
-                insert_fedora_metadata(conn, metadata_obj, fedora_result_id)
+        if data['FedoraResult'] is not None:
+            fedora_result_id = insert_fedora_result(conn, data, ingest_record_id)
+
+            if data['FedoraResult']['GenericFilePaths'] is not None:
+                for file_path in data['FedoraResult']['GenericFilePaths']:
+                    insert_fedora_generic_files(conn, file_path, fedora_result_id)
+
+            if data['FedoraResult']['MetadataRecords'] is not None:
+                for metadata_obj in data['FedoraResult']['MetadataRecords']:
+                    insert_fedora_metadata(conn, metadata_obj, fedora_result_id)
 
         conn.execute("commit")
         return 1
