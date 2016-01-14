@@ -4,66 +4,120 @@
 Imports JSON data from the apt_record.json log into a SQLite DB.
 Specifically, this imports intellectual object and generic file data.
 """
-import datetime
+from datetime import datetime
+import json
 import os
 import sqlite3
 import sys
 
 # http://stackoverflow.com/questions/15856976/transactions-with-python-sqlite3
 
+def import_json(file_path, conn):
+    line_number = 0
+    records_inserted = 0
+    with open(file_path) as f:
+        for line in f:
+            line_number += 1
+            try:
+                data = json.loads(line)
+            except ValueError as err:
+                print("Error decoding JSON on line {0}: {1}".format(line_number, err))
+            records_inserted += insert_record(conn, data)
+    print("Processed {0} json records. Inserted {1} new records".format(
+        line_number, records_inserted))
+
+def get_object_identifier(bucket_name, key):
+    institution = bucket_name.replace('aptrust.receiving.', '', 1)
+    return "{0}/{1}".format(institution, key)
+
 def record_exists(conn, etag, bucket_name, key, s3_file_last_modified):
     """
     Returns true if the ingest record exists.
     """
-    # run exists query by natural key
-    pass
+    # this natural key is indexed
+    statement = """
+    select exists(select 1 from ingest_s3_files where
+    etag=? and bucket_name=? and key=? and last_modified=?)
+    """
+    values = (etag, bucket_name, key, s3_file_last_modified)
+    cursor = conn.cursor()
+    cursor.execute(statement, values)
+    result = cursor.fetchone()
+    cursor.close()
+    return result[0] == 1
 
 def insert_record(conn, data):
     """
     Adds a record to the database. Returns 0 if the record already exists,
     1 if the record was inserted, and -1 if the insert transaction failed.
     """
-    if record_exists():
+    if record_exists(conn,
+                     data['S3File']['Key']['ETag'].replace('"', ''),
+                     data['S3File']['BucketName'],
+                     data['S3File']['Key']['Key'],
+                     data['S3File']['Key']['LastModified']):
         return 0
     try:
         conn.execute("begin")
         ingest_record_id = insert_ingest_record(conn, data)
-        ingest_s3_file_id = insert_ingest_s3_file(conn, data, ingest_record_id)
+        ingest_s3_file_id = insert_s3_file(conn, data, ingest_record_id)
         insert_fetch_result(conn, data, ingest_record_id)
         tar_result_id = insert_tar_result(conn, data, ingest_record_id)
 
-        for file_path in data['TarResult']['FilesUnpacked']:
-            insert_unpacked_files(conn, file_path, tar_result_id)
+        if data['TarResult']['FilesUnpacked'] is not None:
+            for file_path in data['TarResult']['FilesUnpacked']:
+                insert_unpacked_files(conn, file_path, tar_result_id)
 
-        for generic_file in data['TarResult']['FilesUnpacked']:
-            insert_generic_files(conn, generic_file, tar_result_id)
+        if data['TarResult']['Files'] is not None:
+            for generic_file in data['TarResult']['Files']:
+                insert_generic_files(conn, generic_file, tar_result_id)
 
         bag_read_result_id = insert_bag_read_result(
             conn, data, ingest_record_id)
 
-        for file_path in data['BagReadResult']['Files']:
-            insert_bag_read_files(conn, file_path, bag_read_result_id)
+        if data['BagReadResult']['Files'] is not None:
+            for file_path in data['BagReadResult']['Files']:
+                insert_bag_read_files(conn, file_path, bag_read_result_id)
 
-        # insert_checksum_errors(conn, data)
-        # insert_tags(conn, data)
-        # insert_fedora_result(conn, data)
-        # insert_fedora_generic_files(conn, data)
-        # insert_fedora_metadata(conn, data)
+        if data['BagReadResult']['ChecksumErrors'] is not None:
+            for checksum_error in data['BagReadResult']['ChecksumErrors']:
+                insert_checksum_errors(conn, checksum_error, bag_read_result_id)
+
+        if data['BagReadResult']['Tags'] is not None:
+            for tag in data['BagReadResult']['Tags']:
+                insert_tags(conn, tag, bag_read_result_id)
+
+        fedora_result_id = insert_fedora_result(conn, data, ingest_record_id)
+
+        if data['FedoraResult']['GenericFilePaths'] is not None:
+            for file_path in data['FedoraResult']['GenericFilePaths']:
+                insert_fedora_generic_files(conn, file_path, fedora_result_id)
+
+        if data['FedoraResult']['MetadataRecords'] is not None:
+            for metadata_obj in data['FedoraResult']['MetadataRecords']:
+                insert_fedora_metadata(conn, metadata_obj, fedora_result_id)
+
         conn.execute("commit")
         return 1
+
     except sqlite3.Error as err:
-        print("Insert failed")
+        print("Insert failed for record {0}/{1}".format(
+            data['S3File']['BucketName'],
+            data['S3File']['Key']['Key']))
         conn.execute("rollback")
         return -1
 
 def do_insert(conn, statement, values):
     try:
-        conn.execute(statement, *values)
-        lastrow_id = conn.lastrowid
+        cursor = conn.cursor()
+        cursor.execute(statement, values)
+        lastrow_id = cursor.lastrowid
     except sqlite3.Error as err:
         print(err)
         print(statement, values)
         raise err
+    finally:
+        cursor.close()
     return lastrow_id
 
 def insert_ingest_record(conn, data):
@@ -77,7 +131,6 @@ def insert_ingest_record(conn, data):
       updated_at)
     values(?,?,?,?,?,?)
     """
-    lastrow_id = -1
     now = datetime.utcnow()
     object_identifier = get_object_identifier(
         data['S3File']['BucketName'],
@@ -102,14 +155,14 @@ def insert_s3_file(conn, data, ingest_record_id):
       created_at,
       updated_at
     )
-    values(?,?,?,?,?,?,?,?,?,?,?)
+    values(?,?,?,?,?,?,?,?)
     """
     now = datetime.utcnow()
     values = (ingest_record_id,
               data['S3File']['BucketName'],
               data['S3File']['Key']['Key'],
               data['S3File']['Key']['Size'],
-              data['S3File']['Key']['ETag'],
+              data['S3File']['Key']['ETag'].replace('"', ''),
               data['S3File']['Key']['LastModified'],
               now,
               now)
@@ -205,36 +258,37 @@ def insert_generic_files(conn, generic_file, tar_result_id):
       stored_at,
       storage_md5,
       identifier,
+      identifier_assigned,
       existing_file,
       needs_save,
       replication_error,
       created_at,
       updated_at
     )
-    values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """
     now = datetime.utcnow()
     values = (tar_result_id,
-              genericFile['Path'],
-              genericFile['Size'],
-              genericFile['Created'],
-              genericFile['Modified'],
-              genericFile['Md5'],
-              genericFile['Md5Verified'],
-              genericFile['Sha256'],
-              genericFile['Sha256Generated'],
-              genericFile['Uuid'],
-              genericFile['UuidGenerated'],
-              genericFile['MimeType'],
-              genericFile['ErrorMessage'],
-              genericFile['StorageURL'],
-              genericFile['StoredAt'],
-              genericFile['StorageMd5'],
-              genericFile['Identifier'],
-              genericFile['IdentifierAssigned'],
-              genericFile['ExistingFile'],
-              genericFile['NeedsSave'],
-              genericFile['ReplicationError'],
+              generic_file['Path'],
+              generic_file['Size'],
+              generic_file['Created'],
+              generic_file['Modified'],
+              generic_file['Md5'],
+              generic_file['Md5Verified'],
+              generic_file['Sha256'],
+              generic_file['Sha256Generated'],
+              generic_file['Uuid'],
+              generic_file['UuidGenerated'],
+              generic_file['MimeType'],
+              generic_file['ErrorMessage'],
+              generic_file['StorageURL'],
+              generic_file['StoredAt'],
+              generic_file['StorageMd5'],
+              generic_file['Identifier'],
+              generic_file['IdentifierAssigned'],
+              generic_file['ExistingFile'],
+              generic_file['NeedsSave'],
+              generic_file['ReplicationError'],
               now,
               now,
     )
@@ -249,7 +303,7 @@ def insert_bag_read_result(conn, data, ingest_record_id):
       created_at,
       updated_at
     )
-    values(?,?,?,?)
+    values(?,?,?,?,?)
     """
     now = datetime.utcnow()
     values = (ingest_record_id,
@@ -274,7 +328,7 @@ def insert_bag_read_files(conn, file_path, bag_read_result_id):
     values = (bag_read_result_id, file_path, now, now)
     return do_insert(conn, statement, values)
 
-def insert_checksum_errors(conn, data):
+def insert_checksum_errors(conn, checksum_error, bag_read_result_id):
     statement = """
     insert into ingest_checksum_errors(
       ingest_bag_read_result_id,
@@ -284,41 +338,56 @@ def insert_checksum_errors(conn, data):
     )
     values(?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (bag_read_result_id,
+              checksum_error,
+              now,
+              now)
     return do_insert(conn, statement, values)
 
-def insert_tags(conn, data):
+def insert_tags(conn, data, bag_read_result_id):
     statement = """
     insert into ingest_tags(
       ingest_bag_read_result_id,
-      label text,
-      value text,
+      label,
+      value,
       created_at,
       updated_at
     )
-    values(?,?,?,?)
+    values(?,?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (bag_read_result_id,
+              data['Label'],
+              data['Value'],
+              now,
+              now)
     return do_insert(conn, statement, values)
 
-def insert_fedora_result(conn, data):
+def insert_fedora_result(conn, data, ingest_record_id):
     statement = """
     insert into ingest_fedora_results(
-      ingest_record_id int not null,
-      object_identifier text,
-      is_new_object bool,
-      error_message text,
+      ingest_record_id,
+      object_identifier,
+      is_new_object,
+      error_message,
       created_at,
       updated_at
     )
     values(?,?,?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (ingest_record_id,
+              data['FedoraResult']['ObjectIdentifier'],
+              data['FedoraResult']['IsNewObject'],
+              data['FedoraResult']['ErrorMessage'],
+              now,
+              now)
     return do_insert(conn, statement, values)
 
-def insert_fedora_generic_files(conn, data):
+def insert_fedora_generic_files(conn, file_path, fedora_result_id):
     statement = """
-    insert into ingest_fedora_results(
+    insert into ingest_fedora_generic_files(
       ingest_fedora_result_id,
       file_path,
       created_at,
@@ -326,10 +395,14 @@ def insert_fedora_generic_files(conn, data):
     )
     values(?,?,?,?)
     """
-    values = ()
+    now = datetime.utcnow()
+    values = (fedora_result_id,
+              file_path,
+              now,
+              now)
     return do_insert(conn, statement, values)
 
-def insert_fedora_metadata(conn, data):
+def insert_fedora_metadata(conn, metadata_obj, fedora_result_id):
     statement = """
     insert into ingest_fedora_metadata(
       ingest_fedora_result_id,
@@ -342,6 +415,13 @@ def insert_fedora_metadata(conn, data):
     )
     values(?,?,?,?,?,?,?)
     """
+    now = datetime.utcnow(fedora_result_id,
+                          metadata_obj['Type'],
+                          metadata_obj['Action'],
+                          metadata_obj['EventObject'],
+                          metadata_obj['ErrorMessage'],
+                          now,
+                          now)
     values = ()
     return do_insert(conn, statement, values)
 
@@ -446,6 +526,7 @@ def initialize_db(conn):
         stored_at datetime,
         storage_md5 text,
         identifier text,
+        identifier_assigned datetime,
         existing_file bool,
         needs_save bool,
         replication_error text,
@@ -635,6 +716,10 @@ def initialize_db(conn):
     c.close()
 
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Missing arg: path to json log file")
+        print("Usage: python logs_to_sql.py <path/to/logfile.json>")
+        sys.exit()
     if not os.path.exists('db'):
         os.mkdir('db')
     conn = sqlite3.connect('db/aptrust_logs.db')
@@ -642,4 +727,5 @@ if __name__ == "__main__":
     # manage these manually.
     conn.isolation_level = None
     initialize_db(conn)
+    import_json(sys.argv[1], conn)
     conn.close()
