@@ -1,0 +1,18 @@
+{"pid":"aptrust:1","name":"APTrust","brief_name":"apt","identifier":"aptrust.org","dpn_uuid":null}
+{"pid":"aptrust:3","name":"North Carolina State University","brief_name":"ncsu","identifier":"ncsu.edu","dpn_uuid":null}
+{"pid":"aptrust:2","name":"Johns Hopkins University","brief_name":"jhu","identifier":"jhu.edu","dpn_uuid":null}
+{"pid":"aptrust:4","name":"Pennsylvania State University","brief_name":"pst","identifier":"psu.edu","dpn_uuid":null}
+{"pid":"aptrust:6","name":"University of Chicago","brief_name":"uchi","identifier":"uchicago.edu","dpn_uuid":null}
+{"pid":"aptrust:5","name":"Syracuse University","brief_name":"syr","identifier":"syr.edu","dpn_uuid":null}
+{"pid":"aptrust:8","name":"University of Connecticut","brief_name":"uconn","identifier":"uconn.edu","dpn_uuid":null}
+{"pid":"aptrust:10","name":"University of Miami","brief_name":"um","identifier":"miami.edu","dpn_uuid":null}
+{"pid":"aptrust:9","name":"University of Maryland","brief_name":"mdu","identifier":"umd.edu","dpn_uuid":null}
+{"pid":"aptrust:7","name":"University of Cincinnati","brief_name":"ucin","identifier":"uc.edu","dpn_uuid":null}
+{"pid":"aptrust:12","name":"University of North Carolina at Chapel Hill","brief_name":"unc","identifier":"unc.edu","dpn_uuid":null}
+{"pid":"aptrust:13","name":"University of Notre Dame","brief_name":"und","identifier":"nd.edu","dpn_uuid":null}
+{"pid":"aptrust:11","name":"University of Michigan","brief_name":"umich","identifier":"umich.edu","dpn_uuid":null}
+{"pid":"aptrust:14","name":"University of Virginia","brief_name":"uva","identifier":"virginia.edu","dpn_uuid":"63fd28df-4178-48e0-b259-343f82f04551"}
+{"pid":"aptrust:29","name":"Virginia Tech","brief_name":null,"identifier":"vt.edu","dpn_uuid":null}
+{"pid":"aptrust:30","name":"Indiana University Bloomington","brief_name":null,"identifier":"indiana.edu","dpn_uuid":null}
+{"pid":"aptrust:154788","name":"Columbia University","brief_name":"cul","identifier":"columbia.edu","dpn_uuid":null}
+{"pid":"aptrust:438760","name":"Georgetown University","brief_name":null,"identifier":"georgetown.edu","dpn_uuid":null}
