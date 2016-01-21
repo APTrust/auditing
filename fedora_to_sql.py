@@ -35,7 +35,9 @@ def import_json(conn, file_path):
                 data = json.loads(line)
             except ValueError as err:
                 print("Error decoding JSON on line {0}: {1}".format(line_number, err))
-            records_saved += save_function(conn, data)
+            new_id = save_function(conn, data)
+            if new_id > 0:
+                records_saved += 1
     print("Processed {0} json records. Saved {1} new/updated records".format(
         line_number, records_saved))
 
@@ -69,17 +71,23 @@ def institution_exists(conn, fedora_pid):
 
 def record_exists(conn, table, column, value):
     """
-    Returns true if a record is already in the database.
+    Returns true if the record if it exists.
     Query should be on a column with a unique index.
     """
     statement = "select exists(select 1 from {0} where {1}=?)".format(
         table, column)
-    values = (value)
+    values = (value,)
     cursor = conn.cursor()
     cursor.execute(statement, values)
     result = cursor.fetchone()
     cursor.close()
-    return result[0] == 1
+    return result
+
+# def data_changed(new_data, db_record):
+#     for key, value in new_data.iteritems():
+#         if db_record[key] != value:
+#             return true
+#     return false
 
 def checksum_exists(conn, fedora_file_id, data):
     """
@@ -101,8 +109,14 @@ def save_institution(conn, data):
     """
     Inserts or updates institution records in the SQL database.
     """
-    # TODO: Implement me!
-    return 0
+    if institution_exists(conn, data['pid']):
+        return 0
+    statement = """insert into fedora_institutions(pid, name, brief_name,
+    identifier, dpn_uuid) values (?,?,?,?,?)
+    """
+    values = (data['pid'], data['name'], data['brief_name'],
+              data['identifier'], data['dpn_uuid'])
+    return do_save(conn, statement, values)
 
 def save_intellectual_object(conn, data):
     """
@@ -112,7 +126,7 @@ def save_intellectual_object(conn, data):
     # TODO: Implement me!
     return 0
 
-def do_insert(conn, statement, values):
+def do_save(conn, statement, values):
     try:
         cursor = conn.cursor()
         cursor.execute(statement, values)
@@ -288,6 +302,7 @@ if __name__ == "__main__":
     # Turn OFF automatic transactions, because we want to
     # manage these manually.
     conn.isolation_level = None
+    #conn.row_factory = sqlite3.Row
     initialize_db(conn)
     import_json(conn, sys.argv[1])
     conn.close()
