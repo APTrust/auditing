@@ -43,10 +43,11 @@ def import_json(conn, file_path):
             except sqlite3.Error as err:
                 print("Insert failed for record {0}/{1}".format(
                     data['id'], data['identifier']))
+                print(err)
                 conn.execute("rollback")
             if new_id > 0:
                 records_saved += 1
-    print("Processed {0} json records. Saved {1} new/updated records".format(
+    print("Processed {0} json records. Saved {1} new records".format(
         line_number, records_saved))
 
 def object_exists(conn, fedora_pid):
@@ -96,7 +97,7 @@ def checksum_exists(conn, fedora_file_id, data):
     Returns true if the checksum is already in the database.
     """
     statement = """select exists(select 1 from fedora_checksums
-    where fedora_file_id=? and algorithm=? and digest=? and datetime=?)"""
+    where fedora_file_id=? and algorithm=? and digest=? and date_time=?)"""
     values = (fedora_file_id,
               data['algorithm'],
               data['digest'],
@@ -145,7 +146,7 @@ def save_intellectual_object(conn, data):
     if data['generic_files'] is not None:
         for generic_file in data['generic_files']:
             generic_file_id = save_file(conn, generic_file, object_id)
-    return new_object_id
+    return object_id
 
 def do_save(conn, statement, values):
     try:
@@ -190,10 +191,10 @@ def save_checksum(conn, data, generic_file_id):
     if checksum_exists(conn, generic_file_id, data):
         return 0
     statement = """insert into fedora_checksums(fedora_file_id,
-    agorithm, digest, created) values (?,?,?,?)
+    algorithm, digest, date_time) values (?,?,?,?)
     """
     values = (generic_file_id, data['algorithm'],
-              data['digest'], data['created'],)
+              data['digest'], data['datetime'],)
     return do_save(conn, statement, values)
 
 def save_event(conn, data, object_id, file_id):
@@ -262,7 +263,7 @@ def initialize_db(conn):
         fedora_file_id int,
         algorithm text,
         digest text,
-        created datetime,
+        date_time datetime,
         FOREIGN KEY(fedora_file_id) REFERENCES fedora_files(id))"""
         conn.execute(statement)
         conn.commit()
