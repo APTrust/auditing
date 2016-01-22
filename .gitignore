@@ -1,3 +1,8 @@
 # Ignore database files. These will be quite large and may contain data
 # we don't want to store in a public repo.
+
+# SQLite databases
 db/*
+
+# Actual exported data (json files)
+data/*
