@@ -25,9 +25,10 @@ def import_json(conn, file_path):
         print "Looks like you're importing institutions"
         save_function = save_institution
     elif not "objects.json" in file_path:
-        print "Assuming you're saving Fedora objects/files/events"
+        print "Assuming you're saving Fedora objects, files and events"
     with open(file_path) as f:
         for line in f:
+            new_id = 0
             line_number += 1
             if line_number % 500 == 0:
                 print("Processed {0} lines".format(line_number))
@@ -35,7 +36,14 @@ def import_json(conn, file_path):
                 data = json.loads(line)
             except ValueError as err:
                 print("Error decoding JSON on line {0}: {1}".format(line_number, err))
-            new_id = save_function(conn, data)
+            try:
+                conn.execute("begin")
+                new_id = save_function(conn, data)
+                conn.execute("commit")
+            except sqlite3.Error as err:
+                print("Insert failed for record {0}/{1}".format(
+                    data['id'], data['identifier']))
+                conn.execute("rollback")
             if new_id > 0:
                 records_saved += 1
     print("Processed {0} json records. Saved {1} new/updated records".format(
@@ -81,13 +89,7 @@ def record_exists(conn, table, column, value):
     cursor.execute(statement, values)
     result = cursor.fetchone()
     cursor.close()
-    return result
-
-# def data_changed(new_data, db_record):
-#     for key, value in new_data.iteritems():
-#         if db_record[key] != value:
-#             return true
-#     return false
+    return result[0] == 1
 
 def checksum_exists(conn, fedora_file_id, data):
     """
@@ -123,8 +125,20 @@ def save_intellectual_object(conn, data):
     Inserts or updates intellectual object records in the SQL database.
     This includes, the object, its generic files, and all related events.
     """
-    # TODO: Implement me!
-    return 0
+    if object_exists(conn, data['id']):
+        print("Object {0} already exists in DB".format(data['id']))
+        return 0
+    statement = """insert into fedora_objects(
+    pid, title, description, access, bag_name,
+    identifier, state, alt_identifier) values (?,?,?,?,?,?,?,?)
+    """
+    alt_identifier = None
+    if len(data['alt_identifier']) > 0:
+        alt_identifier = data['alt_identifier'][0]
+    values = (data['id'],data['title'],data['description'],
+              data['access'],data['bag_name'],data['identifier'],
+              data['state'], alt_identifier)
+    return do_save(conn, statement, values)
 
 def do_save(conn, statement, values):
     try:
