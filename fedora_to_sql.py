@@ -138,7 +138,14 @@ def save_intellectual_object(conn, data):
     values = (data['id'],data['title'],data['description'],
               data['access'],data['bag_name'],data['identifier'],
               data['state'], alt_identifier)
-    return do_save(conn, statement, values)
+    object_id = do_save(conn, statement, values)
+    if data['premisEvents'] is not None:
+        for event in data['premisEvents']:
+            event_id = save_event(conn, event, object_id, None)
+    if data['generic_files'] is not None:
+        for generic_file in data['generic_files']:
+            generic_file_id = save_file(conn, generic_file, object_id)
+    return new_object_id
 
 def do_save(conn, statement, values):
     try:
@@ -153,17 +160,61 @@ def do_save(conn, statement, values):
         cursor.close()
     return lastrow_id
 
-def save_object(conn, data):
-    pass
+def save_file(conn, data, object_id):
+    """
+    Saves a Generic File and it's checksums and PREMIS events.
+    """
+    if file_exists(conn, data['id']):
+        return 0
+    statement = """insert into fedora_files(fedora_object_id,
+    pid, uri, size, created, modified, file_format, identifier,
+    state) values (?,?,?,?,?,?,?,?,?)
+    """
+    values = (object_id, data['id'], data['uri'],
+              data['size'], data['created'], data['modified'],
+              data['file_format'], data['identifier'],
+              data['state'],)
+    file_id = do_save(conn, statement, values)
+    if data['checksum'] is not None:
+        for checksum in data['checksum']:
+            checksum_id = save_checksum(conn, checksum, file_id)
+    if data['premisEvents'] is not None:
+        for event in data['premisEvents']:
+            event_id = save_event(conn, event, object_id, file_id)
+    return file_id
 
-def save_file(conn, data):
-    pass
+def save_checksum(conn, data, generic_file_id):
+    """
+    Saves a checksum, which belongs to a single Generic File.
+    """
+    if checksum_exists(conn, generic_file_id, data):
+        return 0
+    statement = """insert into fedora_checksums(fedora_file_id,
+    agorithm, digest, created) values (?,?,?,?)
+    """
+    values = (generic_file_id, data['algorithm'],
+              data['digest'], data['created'],)
+    return do_save(conn, statement, values)
 
-def save_checksum(conn, data):
-    pass
-
-def save_event(conn, data):
-    pass
+def save_event(conn, data, object_id, file_id):
+    """
+    Saves a PREMIS event. All events should have an object_id.
+    Events related to a specific file (most events) will also
+    have a file_id.
+    """
+    if event_exists(conn, data['identifier']):
+        return 0
+    statement = """insert into fedora_events(
+    fedora_object_id, fedora_file_id, identifier, type,
+    date_time, detail, outcome, outcome_detail, object,
+    agent, outcome_information) values (?,?,?,?,?,?,?,?,?,?,?)
+    """
+    values = (object_id, file_id, data['identifier'],
+              data['type'], data['date_time'], data['detail'],
+              data['outcome'], data['outcome_detail'],
+              data['object'], data['agent'],
+              data['outcome_information'],)
+    return do_save(conn, statement, values)
 
 def initialize_db(conn):
     """
@@ -201,7 +252,6 @@ def initialize_db(conn):
         file_format text,
         identifier text,
         state text,
-        alt_identifier text,
         FOREIGN KEY(fedora_object_id) REFERENCES fedora_objects(id))"""
         conn.execute(statement)
         conn.commit()
