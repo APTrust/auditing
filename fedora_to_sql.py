@@ -27,7 +27,7 @@ def import_json(conn, file_path):
     if "institutions.json" in file_path:
         print "Looks like you're importing institutions"
         save_function = save_institution
-    elif not "objects.json" in file_path:
+    else:
         print "Assuming you're saving Fedora objects, files and events"
         cache_institutions(conn)
     with open(file_path) as f:
@@ -232,7 +232,9 @@ def institution_id(object_identifier):
     inst_identifier, obj_name = object_identifier.split('/', 1)
     institution_id = institutions.get(inst_identifier.lower())
     if institution_id is None:
-        raise RuntimeError("No institution for {0}".format(object_identifier))
+        raise RuntimeError(
+            "No institution object {0}, institution identifier {1}".format(
+                object_identifier, inst_identifier))
     return institution_id
 
 def cache_institutions(conn):
