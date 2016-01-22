@@ -13,6 +13,9 @@ import os
 import sqlite3
 import sys
 
+# We cache institution ids when loading objects
+institutions = {}
+
 def import_json(conn, file_path):
     line_number = 0
     records_saved = 0
@@ -26,6 +29,7 @@ def import_json(conn, file_path):
         save_function = save_institution
     elif not "objects.json" in file_path:
         print "Assuming you're saving Fedora objects, files and events"
+        cache_institutions(conn)
     with open(file_path) as f:
         for line in f:
             new_id = 0
@@ -40,7 +44,7 @@ def import_json(conn, file_path):
                 conn.execute("begin")
                 new_id = save_function(conn, data)
                 conn.execute("commit")
-            except sqlite3.Error as err:
+            except (sqlite3.Error, RuntimeError) as err:
                 print("Insert failed for record {0}/{1}".format(
                     data['id'], data['identifier']))
                 print(err)
@@ -130,15 +134,21 @@ def save_intellectual_object(conn, data):
         print("Object {0} already exists in DB".format(data['id']))
         return 0
     statement = """insert into fedora_objects(
-    pid, title, description, access, bag_name,
-    identifier, state, alt_identifier) values (?,?,?,?,?,?,?,?)
+    pid, fedora_institution_id, title, description, access, bag_name,
+    identifier, state, alt_identifier) values (?,?,?,?,?,?,?,?,?)
     """
     alt_identifier = None
     if len(data['alt_identifier']) > 0:
         alt_identifier = data['alt_identifier'][0]
-    values = (data['id'],data['title'],data['description'],
-              data['access'],data['bag_name'],data['identifier'],
-              data['state'], alt_identifier)
+    values = (data['id'],
+              institution_id(data['identifier']),
+              data['title'],
+              data['description'],
+              data['access'],
+              data['bag_name'],
+              data['identifier'],
+              data['state'],
+              alt_identifier)
     object_id = do_save(conn, statement, values)
     if data['premisEvents'] is not None:
         for event in data['premisEvents']:
@@ -217,6 +227,24 @@ def save_event(conn, data, object_id, file_id):
               data['outcome_information'],)
     return do_save(conn, statement, values)
 
+def institution_id(object_identifier):
+    "Given an object identifier, returns the institution id"
+    inst_identifier, obj_name = object_identifier.split('/', 1)
+    institution_id = institutions.get(inst_identifier.lower())
+    if institution_id is None:
+        raise RuntimeError("No institution for {0}".format(object_identifier))
+    return institution_id
+
+def cache_institutions(conn):
+    query = "select id, identifier from fedora_institutions"
+    cursor = conn.cursor()
+    for row in cursor.execute(query):
+        # map identifier (e.g. virginia.edu) to primary key
+        institutions[row[1].lower()] = row[0]
+    cursor.close()
+    if len(institutions) == 0:
+        raise RuntimeError("You must load institutions before loading objects.")
+
 def initialize_db(conn):
     """
     Creates the database tables and indexes if they don't already exist.
@@ -227,9 +255,21 @@ def initialize_db(conn):
     c.execute(query)
     row = c.fetchone()
     if not row or len(row) < 1:
+        print("Creating table fedora_institutions")
+        statement = """create table fedora_institutions(
+        id integer primary key autoincrement,
+        pid text,
+        name text,
+        brief_name text,
+        identifier text,
+        dpn_uuid text)"""
+        conn.execute(statement)
+        conn.commit()
+
         print("Creating table fedora_objects")
         statement = """create table fedora_objects(
         id integer primary key autoincrement,
+        fedora_institution_id int not null,
         pid text,
         title text,
         description text,
@@ -237,7 +277,8 @@ def initialize_db(conn):
         bag_name text,
         identifier text,
         state text,
-        alt_identifier text)"""
+        alt_identifier text,
+        FOREIGN KEY(fedora_institution_id) REFERENCES fedora_institutions(id))"""
         conn.execute(statement)
         conn.commit()
 
@@ -284,17 +325,6 @@ def initialize_db(conn):
         outcome_information text,
         FOREIGN KEY(fedora_object_id) REFERENCES fedora_objects(id)
         FOREIGN KEY(fedora_file_id) REFERENCES fedora_files(id))"""
-        conn.execute(statement)
-        conn.commit()
-
-        print("Creating table fedora_institutions")
-        statement = """create table fedora_institutions(
-        id integer primary key autoincrement,
-        pid text,
-        name text,
-        brief_name text,
-        identifier text,
-        dpn_uuid text)"""
         conn.execute(statement)
         conn.commit()
 
