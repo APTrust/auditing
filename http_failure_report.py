@@ -20,9 +20,11 @@ def run_report(conn):
     while rows:
         for row in rows:
             obj_identifier = get_object_identifier(row)
+            tar_file_name = obj_identifier + ".tar"
             bag = {}
             bag['obj_identifier'] = obj_identifier
-            bag['ingest_files'] = files_read_at_ingest(conn, obj_identifier)
+            bag['ingest_files'] = files_read_at_ingest(conn, tar_file_name)
+            bag['fedora_generic_files'] = files_in_fedora(conn, obj_identifier)
             print_item_report(bag)
         rows = cursor.fetchmany(size=20)
     cursor.close()
@@ -30,6 +32,7 @@ def run_report(conn):
 def print_item_report(bag):
     print(bag['obj_identifier'])
     print(bag['ingest_files'])
+    print(bag['fedora_generic_files'])
 
 def files_read_at_ingest(conn, object_identifier):
     ids = get_ingest_ids(conn, object_identifier)
@@ -64,7 +67,10 @@ def get_object_identifier(row):
     if row['object_identifier'] is not None:
         return row['object_identifier']
     inst = row['bucket'].replace('aptrust.receiving.', '')
-    return "{0}/{1}".format(inst, row['name'])
+    bag_name = row['name']
+    if bag_name.endswith(".tar"):
+        bag_name = bag_name[0:-4]
+    return "{0}/{1}".format(inst, bag_name)
 
 def get_ingest_ids(conn, object_identifier):
     if object_identifier is None:
@@ -119,10 +125,19 @@ def get_hashes(conn, table, where_column, value, columns_to_fetch):
     return results
 
 
-def files_in_fedora(conn, row):
-    pass
+def files_in_fedora(conn, obj_identifier):
+    obj_id = get_id(conn, 'objects', 'identifier', obj_identifier)
+    if obj_id is None:
+        print("No object id for {0}".format(obj_identifier))
+    return get_hashes(conn, 'files', 'object_id',
+                      obj_id, ('uri', 'identifier',))
 
-def files_in_s3_and_glacier(conn, row):
+
+def files_in_s3_and_glacier(conn, bag_name):
+    query = """select k.name, m2.name, m2.value from s3_keys as k
+    inner join s3_meta as m1 on k.id = m1.key_id
+    inner join s3_meta as m2 on m2.key_id = k.id
+    where m1.name='bag' and m1.value=?"""
     pass
 
 if __name__ == "__main__":
