@@ -319,8 +319,10 @@ def institution_by_pid(conn, pid):
     c = conn.cursor()
     c.execute(query, values)
     row = c.fetchone()
-    institution_id = row[0]
     c.close()
+    institution_id = None
+    if row:
+        institution_id = row[0]
     if institution_id is None:
         raise RuntimeError(
             "No institution for pid {0}".format(pid))
