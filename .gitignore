@@ -6,3 +6,6 @@ db/*
 
 # Actual exported data (json files)
 data/*
+
+# Emacs backup files
+*~
