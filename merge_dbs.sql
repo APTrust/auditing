@@ -21,7 +21,7 @@ attach 'db/aptrust_fedora.db' as fedora;
 --
 -- Create the schema with proper foreign keys.
 --
-create table fedora_institutions(
+create table institutions(
   id integer primary key autoincrement,
   pid varchar(40),
   name varchar(255),
@@ -29,9 +29,54 @@ create table fedora_institutions(
   identifier varchar(80),
   dpn_uuid varchar(40));
 
-create table fedora_objects(
+create table users (
   id integer primary key autoincrement,
-  fedora_institution_id int not null,
+  email varchar(255) not null,
+  name varchar(255),
+  phone_number varchar(80),
+  institution_id integer,
+  encrypted_api_secret_key varchar(255),
+  encrypted_password varchar(255),
+  reset_password_token varchar(255),
+  reset_password_sent_at datetime,
+  remember_created_at datetime,
+  sign_in_count integer,
+  current_sign_in_at datetime,
+  last_sign_in_at datetime,
+  current_sign_in_ip varchar(40),
+  last_sign_in_ip varchar(40),
+  created_at datetime,
+  updated_at datetime,
+  FOREIGN KEY(institution_id)
+  REFERENCES institutions(id));
+
+
+create table work_items(
+  id integer primary key autoincrement,
+  name varchar(255),
+  etag varchar(80),
+  bag_date datetime,
+  bucket varchar(255),
+  user_id integer,
+  institution_id integer,
+  file_mod_date datetime,
+  note text,
+  action varchar(40),
+  stage varchar(40),
+  status varchar(40),
+  outcome varchar(40),
+  retry boolean,
+  reviewed boolean,
+  object_identifier varchar(255),
+  generic_file_identifier varchar(255),
+  created_at datetime,
+  updated_at datetime,
+  FOREIGN KEY(institution_id)
+  REFERENCES institutions(id));
+
+create table objects(
+  id integer primary key autoincrement,
+  institution_id int not null,
   pid varchar(40),
   title varchar(255),
   description text,
@@ -40,11 +85,11 @@ create table fedora_objects(
   identifier varchar(255),
   state char(1),
   alt_identifier varchar(255),
-  FOREIGN KEY(fedora_institution_id) REFERENCES fedora_institutions(id));
+  FOREIGN KEY(institution_id) REFERENCES institutions(id));
 
-create table fedora_files(
+create table files(
   id integer primary key autoincrement,
-  fedora_object_id int,
+  object_id int,
   pid varchar(40),
   uri varchar(255),
   size unsigned big int,
@@ -53,20 +98,20 @@ create table fedora_files(
   file_format varchar(80),
   identifier varchar(255),
   state char(1),
-  FOREIGN KEY(fedora_object_id) REFERENCES fedora_objects(id));
+  FOREIGN KEY(object_id) REFERENCES objects(id));
 
-create table fedora_checksums(
+create table checksums(
   id integer primary key autoincrement,
-  fedora_file_id int,
+  file_id int,
   algorithm varchar(10),
   digest varchar(80),
   date_time datetime,
-  FOREIGN KEY(fedora_file_id) REFERENCES fedora_files(id));
+  FOREIGN KEY(file_id) REFERENCES files(id));
 
-create table fedora_events(
+create table events(
   id integer primary key autoincrement,
-  fedora_object_id int null,
-  fedora_file_id int null,
+  object_id int null,
+  file_id int null,
   identifier varchar(40),
   type varchar(80),
   date_time datetime,
@@ -76,31 +121,35 @@ create table fedora_events(
   object varchar(255),
   agent varchar(255),
   outcome_information varchar(255),
-  FOREIGN KEY(fedora_object_id) REFERENCES fedora_objects(id)
-  FOREIGN KEY(fedora_file_id) REFERENCES fedora_files(id));
+  FOREIGN KEY(object_id) REFERENCES objects(id)
+  FOREIGN KEY(file_id) REFERENCES files(id));
 
 
 --
 -- Import the data
 --
-insert into fedora_institutions select * from fedora.fedora_institutions;
-insert into fedora_objects select * from fedora.fedora_objects;
-insert into fedora_files select * from fedora.fedora_files;
-insert into fedora_checksums select * from fedora.fedora_checksums;
-insert into fedora_events select * from fedora.fedora_events;
+insert into institutions select * from fedora.institutions;
+insert into users select * from fedora.users;
+insert into objects select * from fedora.objects;
+insert into files select * from fedora.files;
+insert into checksums select * from fedora.checksums;
+insert into events select * from fedora.events;
+insert into work_items select * from fedora.work_items;
 
 --
 -- Create Indexes last, so they don't slow the inserts
 --
-create unique index ix_fedora_obj_pid on fedora_objects(pid);
-create unique index ix_fedora_obj_identifier on fedora_objects(identifier);
-create unique index ix_fedora_file_pid on fedora_files(pid);
-create unique index ix_fedora_file_identifier on fedora_files(identifier);
-create index ix_fedora_file_object_id on fedora_files(fedora_object_id);
-create index ix_fedora_checksum_file_id on fedora_checksums(fedora_file_id);
-create index ix_fedora_events_object_id on fedora_events(fedora_object_id);
-create index ix_fedora_events_file_id on fedora_events(fedora_file_id);
-create unique index ix_fedora_events_identifier on fedora_events(identifier);
+create unique index ix_obj_pid on objects(pid);
+create unique index ix_obj_identifier on objects(identifier);
+create unique index ix_file_pid on files(pid);
+create unique index ix_file_identifier on files(identifier);
+create index ix_file_object_id on files(object_id);
+create index ix_checksum_file_id on checksums(file_id);
+create index ix_events_object_id on events(object_id);
+create index ix_events_file_id on events(file_id);
+create unique index ix_events_identifier on events(identifier);
+create unique index ix_users_email on users(email);
+create index ix_name_etag_bucket on work_items(name, etag, bucket);
 
 
 ------------------------------------------------------------------------

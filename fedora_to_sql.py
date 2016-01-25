@@ -27,6 +27,14 @@ def import_json(conn, file_path):
     if "institutions.json" in file_path:
         print "Looks like you're importing institutions"
         save_function = save_institution
+    elif "users.json" in file_path:
+        print "Looks like you're importing users"
+        save_function = save_user
+        cache_institutions(conn)
+    elif "processed_items.json" in file_path:
+        print "Looks like you're importing processed items"
+        save_function = save_work_item
+        cache_institutions(conn)
     else:
         print "Assuming you're saving Fedora objects, files and events"
         cache_institutions(conn)
@@ -46,7 +54,7 @@ def import_json(conn, file_path):
                 conn.execute("commit")
             except (sqlite3.Error, RuntimeError) as err:
                 print("Insert failed for record {0}/{1}".format(
-                    data['id'], data['identifier']))
+                    data['id'], data.get('identifier', 'no identifier')))
                 print(err)
                 conn.execute("rollback")
             if new_id > 0:
@@ -54,33 +62,33 @@ def import_json(conn, file_path):
     print("Processed {0} json records. Saved {1} new records".format(
         line_number, records_saved))
 
-def object_exists(conn, fedora_pid):
+def object_exists(conn, pid):
     """
-    Returns true if an intellectual object with the fedora_pid is
+    Returns true if an intellectual object with the pid is
     already in the database.
     """
-    return record_exists(conn, 'fedora_objects', 'pid', fedora_pid)
+    return record_exists(conn, 'objects', 'pid', pid)
 
-def file_exists(conn, fedora_pid):
+def file_exists(conn, pid):
     """
-    Returns true if a generic file with the fedora_pid is already
+    Returns true if a generic file with the pid is already
     in the database.
     """
-    return record_exists(conn, 'fedora_files', 'pid', fedora_pid)
+    return record_exists(conn, 'files', 'pid', pid)
 
 def event_exists(conn, event_uuid):
     """
     Returns true if an event with the event_uuid is already
     in the database.
     """
-    return record_exists(conn, 'fedora_events', 'identifier', event_uuid)
+    return record_exists(conn, 'events', 'identifier', event_uuid)
 
-def institution_exists(conn, fedora_pid):
+def institution_exists(conn, pid):
     """
-    Returns true if an institution with the fedora_pid is already
+    Returns true if an institution with the pid is already
     in the database.
     """
-    return record_exists(conn, 'fedora_institutions', 'pid', fedora_pid)
+    return record_exists(conn, 'institutions', 'pid', pid)
 
 def record_exists(conn, table, column, value):
     """
@@ -96,13 +104,13 @@ def record_exists(conn, table, column, value):
     cursor.close()
     return result[0] == 1
 
-def checksum_exists(conn, fedora_file_id, data):
+def checksum_exists(conn, file_id, data):
     """
     Returns true if the checksum is already in the database.
     """
-    statement = """select exists(select 1 from fedora_checksums
-    where fedora_file_id=? and algorithm=? and digest=? and date_time=?)"""
-    values = (fedora_file_id,
+    statement = """select exists(select 1 from checksums
+    where file_id=? and algorithm=? and digest=? and date_time=?)"""
+    values = (file_id,
               data['algorithm'],
               data['digest'],
               data['datetime'])
@@ -118,7 +126,7 @@ def save_institution(conn, data):
     """
     if institution_exists(conn, data['pid']):
         return 0
-    statement = """insert into fedora_institutions(pid, name, brief_name,
+    statement = """insert into institutions(pid, name, brief_name,
     identifier, dpn_uuid) values (?,?,?,?,?)
     """
     values = (data['pid'], data['name'], data['brief_name'],
@@ -133,8 +141,8 @@ def save_intellectual_object(conn, data):
     if object_exists(conn, data['id']):
         print("Object {0} already exists in DB".format(data['id']))
         return 0
-    statement = """insert into fedora_objects(
-    pid, fedora_institution_id, title, description, access, bag_name,
+    statement = """insert into objects(
+    pid, institution_id, title, description, access, bag_name,
     identifier, state, alt_identifier) values (?,?,?,?,?,?,?,?,?)
     """
     alt_identifier = None
@@ -177,7 +185,7 @@ def save_file(conn, data, object_id):
     """
     if file_exists(conn, data['id']):
         return 0
-    statement = """insert into fedora_files(fedora_object_id,
+    statement = """insert into files(object_id,
     pid, uri, size, created, modified, file_format, identifier,
     state) values (?,?,?,?,?,?,?,?,?)
     """
@@ -200,7 +208,7 @@ def save_checksum(conn, data, generic_file_id):
     """
     if checksum_exists(conn, generic_file_id, data):
         return 0
-    statement = """insert into fedora_checksums(fedora_file_id,
+    statement = """insert into checksums(file_id,
     algorithm, digest, date_time) values (?,?,?,?)
     """
     values = (generic_file_id, data['algorithm'],
@@ -215,8 +223,8 @@ def save_event(conn, data, object_id, file_id):
     """
     if event_exists(conn, data['identifier']):
         return 0
-    statement = """insert into fedora_events(
-    fedora_object_id, fedora_file_id, identifier, type,
+    statement = """insert into events(
+    object_id, file_id, identifier, type,
     date_time, detail, outcome, outcome_detail, object,
     agent, outcome_information) values (?,?,?,?,?,?,?,?,?,?,?)
     """
@@ -227,9 +235,76 @@ def save_event(conn, data, object_id, file_id):
               data['outcome_information'],)
     return do_save(conn, statement, values)
 
+def save_user(conn, data):
+    if user_by_email(conn, data['email']):
+        return 0
+    statement = """insert into users(
+    id, email, name, phone_number, institution_id, encrypted_api_secret_key,
+    encrypted_password, reset_password_token,
+    reset_password_sent_at, remember_created_at,
+    sign_in_count, current_sign_in_at, last_sign_in_at,
+    current_sign_in_ip, last_sign_in_ip, created_at, updated_at)
+    values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
+    values = (data['id'],
+              data['email'],
+              data['name'],
+              data['phone_number'],
+              institution_by_pid(conn, data['institution_pid']),
+              data['encrypted_api_secret_key'],
+              data['encrypted_password'],
+              None,
+              None,
+              None,
+              0,
+              None,
+              None,
+              None,
+              None,
+              data['created_at'],
+              data['updated_at'],)
+    return do_save(conn, statement, values)
+
+
+def save_work_item(conn, data):
+    statement = """insert into work_items(
+    id, name, etag, bag_date, bucket, user_id,
+    institution_id, file_mod_date, note, action,
+    stage, status, outcome, retry, reviewed,
+    object_identifier, generic_file_identifier,
+    created_at, updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
+    if record_exists(conn, 'work_items', 'id', data['id']):
+        return 0
+    values = (data['id'],
+              data['name'],
+              data['etag'].replace('"', ''),
+              data['bag_date'],
+              data['bucket'],
+              user_by_email(conn, data['user']),
+              institution_id(data['institution']),
+              data['date'],
+              data['note'],
+              data['action'],
+              data['stage'],
+              data['status'],
+              data['outcome'],
+              data['retry'],
+              data['reviewed'],
+              data['object_identifier'],
+              data['generic_file_identifier'],
+              data['created_at'],
+              data['updated_at'],)
+    return do_save(conn, statement, values)
+
+
 def institution_id(object_identifier):
     "Given an object identifier, returns the institution id"
-    inst_identifier, obj_name = object_identifier.split('/', 1)
+    if '/' in object_identifier:
+        inst_identifier, obj_name = object_identifier.split('/', 1)
+    else:
+        inst_identifier = object_identifier
+        obj_name = None
     institution_id = institutions.get(inst_identifier.lower())
     if institution_id is None:
         raise RuntimeError(
@@ -237,8 +312,34 @@ def institution_id(object_identifier):
                 object_identifier, inst_identifier))
     return institution_id
 
+def institution_by_pid(conn, pid):
+    "Given an institution pid, returns the institution id"
+    query = "select id from institutions where pid=?"
+    values = (pid,)
+    c = conn.cursor()
+    c.execute(query, values)
+    row = c.fetchone()
+    institution_id = row[0]
+    c.close()
+    if institution_id is None:
+        raise RuntimeError(
+            "No institution for pid {0}".format(pid))
+    return institution_id
+
+def user_by_email(conn, email):
+    query = "select id from users where email=?"
+    values = (email,)
+    c = conn.cursor()
+    c.execute(query, values)
+    row = c.fetchone()
+    user_id = None
+    if row:
+        user_id = row[0]
+    c.close()
+    return user_id
+
 def cache_institutions(conn):
-    query = "select id, identifier from fedora_institutions"
+    query = "select id, identifier from institutions"
     cursor = conn.cursor()
     for row in cursor.execute(query):
         # map identifier (e.g. virginia.edu) to primary key
@@ -252,13 +353,13 @@ def initialize_db(conn):
     Creates the database tables and indexes if they don't already exist.
     """
     query = """SELECT name FROM sqlite_master WHERE type='table'
-    AND name='fedora_objects'"""
+    AND name='objects'"""
     c = conn.cursor()
     c.execute(query)
     row = c.fetchone()
     if not row or len(row) < 1:
-        print("Creating table fedora_institutions")
-        statement = """create table fedora_institutions(
+        print("Creating table institutions")
+        statement = """create table institutions(
         id integer primary key autoincrement,
         pid text,
         name text,
@@ -268,10 +369,61 @@ def initialize_db(conn):
         conn.execute(statement)
         conn.commit()
 
-        print("Creating table fedora_objects")
-        statement = """create table fedora_objects(
+        print("Creating table users")
+        statement = """create table users(
         id integer primary key autoincrement,
-        fedora_institution_id int not null,
+        email varchar(255) not null,
+        name varchar(255),
+        phone_number varchar(80),
+        institution_id integer,
+        encrypted_api_secret_key varchar(255),
+        encrypted_password varchar(255),
+        reset_password_token varchar(255),
+        reset_password_sent_at datetime,
+        remember_created_at datetime,
+        sign_in_count integer,
+        current_sign_in_at datetime,
+        last_sign_in_at datetime,
+        current_sign_in_ip varchar(40),
+        last_sign_in_ip varchar(40),
+        created_at datetime,
+        updated_at datetime,
+        FOREIGN KEY(institution_id)
+        REFERENCES institutions(id));
+        """
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating table work_items")
+        statement = """create table work_items(
+        id integer primary key autoincrement,
+        name varchar(255),
+        etag varchar(80),
+        bag_date datetime,
+        bucket varchar(255),
+        user_id integer,
+        institution_id integer,
+        file_mod_date datetime,
+        note text,
+        action varchar(40),
+        stage varchar(40),
+        status varchar(40),
+        outcome varchar(40),
+        retry boolean,
+        reviewed boolean,
+        object_identifier varchar(255),
+        generic_file_identifier varchar(255),
+        created_at datetime,
+        updated_at datetime,
+        FOREIGN KEY(institution_id)
+        REFERENCES institutions(id));"""
+        conn.execute(statement)
+        conn.commit()
+
+        print("Creating table objects")
+        statement = """create table objects(
+        id integer primary key autoincrement,
+        institution_id int not null,
         pid text,
         title text,
         description text,
@@ -280,14 +432,14 @@ def initialize_db(conn):
         identifier text,
         state text,
         alt_identifier text,
-        FOREIGN KEY(fedora_institution_id) REFERENCES fedora_institutions(id))"""
+        FOREIGN KEY(institution_id) REFERENCES institutions(id))"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating table fedora_files")
-        statement = """create table fedora_files(
+        print("Creating table files")
+        statement = """create table files(
         id integer primary key autoincrement,
-        fedora_object_id int,
+        object_id int,
         pid text,
         uri text,
         size unsigned big int,
@@ -296,26 +448,26 @@ def initialize_db(conn):
         file_format text,
         identifier text,
         state text,
-        FOREIGN KEY(fedora_object_id) REFERENCES fedora_objects(id))"""
+        FOREIGN KEY(object_id) REFERENCES objects(id))"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating table fedora_checksums")
-        statement = """create table fedora_checksums(
+        print("Creating table checksums")
+        statement = """create table checksums(
         id integer primary key autoincrement,
-        fedora_file_id int,
+        file_id int,
         algorithm text,
         digest text,
         date_time datetime,
-        FOREIGN KEY(fedora_file_id) REFERENCES fedora_files(id))"""
+        FOREIGN KEY(file_id) REFERENCES files(id))"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating table fedora_events")
-        statement = """create table fedora_events(
+        print("Creating table events")
+        statement = """create table events(
         id integer primary key autoincrement,
-        fedora_object_id int null,
-        fedora_file_id int null,
+        object_id int null,
+        file_id int null,
         identifier text,
         type text,
         date_time datetime,
@@ -325,63 +477,63 @@ def initialize_db(conn):
         object text,
         agent text,
         outcome_information text,
-        FOREIGN KEY(fedora_object_id) REFERENCES fedora_objects(id)
-        FOREIGN KEY(fedora_file_id) REFERENCES fedora_files(id))"""
+        FOREIGN KEY(object_id) REFERENCES objects(id)
+        FOREIGN KEY(file_id) REFERENCES files(id))"""
         conn.execute(statement)
         conn.commit()
 
         # Indexes
-        print("Creating index ix_obj_pid on fedora_objects")
+        print("Creating index ix_obj_pid on objects")
         statement = """create unique index ix_obj_pid on
-        fedora_objects(pid)"""
+        objects(pid)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_obj_identifier on fedora_objects")
+        print("Creating index ix_obj_identifier on objects")
         statement = """create unique index ix_obj_identifier on
-        fedora_objects(identifier)"""
+        objects(identifier)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_file_pid on fedora_files")
+        print("Creating index ix_file_pid on files")
         statement = """create unique index ix_file_pid on
-        fedora_files(pid)"""
+        files(pid)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_file_identifier on fedora_files")
+        print("Creating index ix_file_identifier on files")
         statement = """create unique index ix_file_identifier on
-        fedora_files(identifier)"""
+        files(identifier)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_file_object_id on fedora_files")
+        print("Creating index ix_file_object_id on files")
         statement = """create index ix_file_object_id on
-        fedora_files(fedora_object_id)"""
+        files(object_id)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_checksum_file_id on fedora_checksums")
+        print("Creating index ix_checksum_file_id on checksums")
         statement = """create index ix_checksum_file_id on
-        fedora_checksums(fedora_file_id)"""
+        checksums(file_id)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_events_object_id on fedora_events")
+        print("Creating index ix_events_object_id on events")
         statement = """create index ix_events_object_id on
-        fedora_events(fedora_object_id)"""
+        events(object_id)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_events_file_id on fedora_events")
+        print("Creating index ix_events_file_id on events")
         statement = """create index ix_events_file_id on
-        fedora_events(fedora_file_id)"""
+        events(file_id)"""
         conn.execute(statement)
         conn.commit()
 
-        print("Creating index ix_events_identifier on fedora_events")
+        print("Creating index ix_events_identifier on events")
         statement = """create unique index ix_events_identifier on
-        fedora_events(identifier)"""
+        events(identifier)"""
         conn.execute(statement)
         conn.commit()
 
@@ -390,8 +542,10 @@ def initialize_db(conn):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Missing arg: path to json data file")
-        print("Usage: python logs_to_sql.py <path/to/institutions.json>")
-        print("Or...  python logs_to_sql.py <path/to/objects.json>")
+        print("Usage: python fedora_to_sql.py <path/to/institutions.json>")
+        print("Or...  python fedora_to_sql.py <path/to/users.json>")
+        print("Or...  python fedora_to_sql.py <path/to/processed_items.json>")
+        print("Or...  python fedora_to_sql.py <path/to/objects.json>")
         sys.exit()
     if not os.path.exists('db'):
         os.mkdir('db')
