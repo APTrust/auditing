@@ -389,9 +389,9 @@ create table s3_keys(
   size int);
 
 create table s3_meta(
-       key_id integer,
-       name varchar(255),
-       value varchar(255));
+  key_id integer,
+  name varchar(255),
+  value varchar(255));
 
 --
 -- Import data
