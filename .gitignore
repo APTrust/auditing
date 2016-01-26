@@ -9,3 +9,9 @@ data/*
 
 # Emacs backup files
 *~
+
+# Mac crap
+.DS_Store
+
+# Query results exported to CSV files
+*.csv
