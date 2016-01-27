@@ -6,6 +6,10 @@
 -- objects, and audit_001_files contains information about
 -- the files that compose those objects.
 --
+-- Usage:
+--
+-- sqlite3 db/aptrust.db < build_audit_001_tables.sql
+--
 
 create table audit_001_objects (
   bucket varchar(80),
