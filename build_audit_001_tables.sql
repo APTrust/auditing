@@ -11,6 +11,11 @@
 -- sqlite3 db/aptrust.db < build_audit_001_tables.sql
 --
 
+drop table if exists audit_001_objects;
+drop table if exists audit_001_files;
+drop table if exists audit_001_problem_files;
+
+
 create table audit_001_objects (
   bucket varchar(80),
   key varchar(80),
@@ -153,6 +158,89 @@ left join s3_keys s1 on (s1.name = igf.uuid or s1.name = substr(igf.storage_url,
 left join s3_keys s2 on (s2.name = igf.uuid or s2.name = substr(igf.storage_url, 55)) and s2.bucket = 'aptrust.preservation.oregon'
 left join files f on f.identifier = o.object_identifier || '/' || uf.file_path
 where uf.file_path like 'data/%';
+
+
+
+
+create table audit_001_problem_files (
+  ingest_record_id int,
+  bag_name varchar(255),
+  gf_file_path varchar(255),
+  gf_uuid varchar(255),
+  gf_identifier varchar(255),
+  gf_needs_save boolean,
+  gf_storage_url varchar(255),
+  gf_stored_at varchar(255),
+  gf_replication_error text,
+  fedora_file_pid varchar(40),
+  fedora_file_uri varchar(255),
+  s3_key varchar(40),
+  glacier_key varchar(40),
+  duplicate_s3 boolean not null default false,
+  duplicate_glacier boolean not null default false,
+  missing_s3 boolean not null default false,
+  missing_glacier boolean not null default false
+);
+
+insert into audit_001_problem_files (
+  ingest_record_id,
+  bag_name,
+  gf_file_path,
+  gf_uuid,
+  gf_identifier,
+  gf_needs_save,
+  gf_storage_url,
+  gf_stored_at,
+  gf_replication_error,
+  fedora_file_pid,
+  fedora_file_uri,
+  s3_key,
+  glacier_key,
+  duplicate_s3,
+  duplicate_glacier,
+  missing_s3,
+  missing_glacier)
+select
+  f.ingest_record_id,
+  o.key,
+  f.gf_file_path,
+  f.gf_uuid,
+  f.gf_identifier,
+  f.gf_needs_save,
+  f.gf_storage_url,
+  f.gf_stored_at,
+  o.error_message,
+  f.fedora_file_pid,
+  f.fedora_file_uri,
+  f.s3_key,
+  f.glacier_key,
+  0,
+  0,
+  0,
+  0
+  from audit_001_objects o
+  inner join audit_001_files f on f.ingest_record_id = o.ingest_record_id
+  where f.gf_needs_save = 1
+  and (f.s3_key is null or f.glacier_key is null or
+       f.s3_key != f.gf_uuid or f.glacier_key != f.gf_uuid or
+       substr(f.gf_storage_url, 55) != f.gf_uuid or
+       substr(f.fedora_file_uri, 55) != f.gf_uuid or
+       f.gf_storage_url != f.fedora_file_uri);
+
+
+update audit_001_problem_files set duplicate_s3 = 1
+where gf_needs_save = 1 and s3_key is not null
+and (s3_key != gf_uuid or s3_key != substr(fedora_file_uri, 55));
+
+update audit_001_problem_files set missing_s3 = 1
+where gf_needs_save = 1 and s3_key is null;
+
+update audit_001_problem_files set duplicate_glacier = 1
+where gf_needs_save = 1 and glacier_key is not null
+and (glacier_key != gf_uuid or glacier_key != substr(fedora_file_uri, 55));
+
+update audit_001_problem_files set missing_glacier = 1
+where gf_needs_save = 1 and glacier_key is null;
 
 
 /*

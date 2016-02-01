@@ -10,6 +10,7 @@ import sys
 
 def full_object_report(conn, bag_name):
     print("Full report for bag {0}".format(bag_name))
+    print_summary_header(conn, bag_name)
     query = """select
     f.ingest_record_id,
     f.unpacked_file_path,
@@ -20,8 +21,7 @@ def full_object_report(conn, bag_name):
     f.fedora_file_uri,
     f.gf_uuid,
     f.s3_key,
-    f.glacier_key,
-    o.error_message
+    f.glacier_key
     from audit_001_objects o
     inner join audit_001_files f on f.ingest_record_id = o.ingest_record_id
     where o.key = ?"""
@@ -40,6 +40,62 @@ def full_object_report(conn, bag_name):
     finally:
         c.close()
 
+def print_summary_header(conn, bag_name):
+    c = conn.cursor()
+    values = (bag_name,)
+
+    query = """select o.error_message from audit_001_objects o where o.key = ?"""
+    c.execute(query, values)
+    error_message = c.fetchone()[0]
+    print("Error: {0}".format(error_message))
+
+    query = """select count(*) from ingest_unpacked_files iuf
+    inner join ingest_tar_results itr on itr.id = iuf.ingest_tar_result_id
+    inner join ingest_s3_files s3 on s3.ingest_record_id = itr.ingest_record_id
+    where s3.key = ? and iuf.file_path like 'data/%'"""
+    c.execute(query, values)
+    unpacked_file_count = c.fetchone()[0]
+
+    print("Files Unpacked:            {0}".format(unpacked_file_count))
+
+    query = """select count(*) from ingest_generic_files igf
+    inner join ingest_tar_results itr on itr.id = igf.ingest_tar_result_id
+    inner join ingest_s3_files s3 on s3.ingest_record_id = itr.ingest_record_id
+    where s3.key = ?"""
+    c.execute(query, values)
+    ingest_generic_file_count = c.fetchone()[0]
+
+    print("Generic Files from Ingest: {0}".format(ingest_generic_file_count))
+
+    query = """select count(*) from ingest_fedora_generic_files igf
+    inner join ingest_fedora_results ifr on ifr.id = igf.ingest_fedora_result_id
+    inner join ingest_s3_files s3 on s3.ingest_record_id = ifr.ingest_record_id
+    where s3.key = ?"""
+    c.execute(query, values)
+    fedora_generic_file_count = c.fetchone()[0]
+
+    print("Generic Files in Fedora:   {0}".format(fedora_generic_file_count))
+
+    bag_name_without_tar = bag_name.rstrip('.tar')
+    query = """select count(distinct(m.key_id)) from s3_meta m
+    inner join s3_keys k on m.key_id = k.id
+    where m.name='bag' and m.value=? and k.bucket='aptrust.preservation.storage'"""
+    c.execute(query, (bag_name_without_tar,))
+    s3_file_count = c.fetchone()[0]
+
+    print("Generic Files in S3:       {0}".format(s3_file_count))
+
+    query = """select count(distinct(m.key_id)) from s3_meta m
+    inner join s3_keys k on m.key_id = k.id
+    where m.name='bag' and m.value=? and k.bucket='aptrust.preservation.oregon'"""
+    c.execute(query, (bag_name_without_tar,))
+    glacier_file_count = c.fetchone()[0]
+
+    print("Generic Files in Glacier:  {0}".format(glacier_file_count))
+
+    c.close()
+
+
 def unrecorded_file_report(conn, bag_name):
     print("Unrecorded file report for bag {0}".format(bag_name))
     query = """select
@@ -52,8 +108,7 @@ def unrecorded_file_report(conn, bag_name):
     f.fedora_file_uri,
     f.gf_uuid,
     f.s3_key,
-    f.glacier_key,
-    o.error_message
+    f.glacier_key
     from audit_001_objects o
     inner join audit_001_files f on f.ingest_record_id = o.ingest_record_id
     where o.key = ?
@@ -79,16 +134,79 @@ def unrecorded_file_report(conn, bag_name):
         c.close()
 
 
+def duplicate_file_report(conn):
+    print("Duplicate file report")
+    query = """select
+    duplicate_s3,
+    duplicate_glacier,
+    gf_uuid,
+    gf_stored_at,
+    substr(gf_storage_url, 55),
+    substr(fedora_file_uri, 55),
+    s3_key,
+    glacier_key,
+    gf_identifier
+    from audit_001_problem_files
+    where duplicate_s3 = 1
+    or duplicate_glacier = 1"""
+    c = conn.cursor()
+    try:
+        c.execute(query)
+        rows = c.fetchall()
+        print("Missing S3\tMissing Glacier\tUUID\tStorage Date\tStorageURL\tFedoraURL\tS3 Key\tGlacier Key\tIdentifier")
+        for row in rows:
+            print("{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}\t{8}".format(
+                row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8]))
+        print('-' * 76)
+        print("{0} rows".format(len(rows)))
+    except (sqlite3.Error, RuntimeError) as err:
+        print(err)
+    finally:
+        c.close()
+
+
+def missing_file_report(conn):
+    print("Missing file report")
+    query = """select
+    missing_s3,
+    missing_glacier,
+    gf_uuid,
+    gf_stored_at,
+    substr(gf_storage_url, 55),
+    substr(fedora_file_uri, 55),
+    s3_key,
+    glacier_key,
+    gf_identifier
+    from audit_001_problem_files
+    where missing_s3 = 1
+    or missing_glacier = 1"""
+    c = conn.cursor()
+    try:
+        c.execute(query)
+        rows = c.fetchall()
+        print("Missing S3\tMissing Glacier\tUUID\tStorage Date\tStorageURL\tFedoraURL\tS3 Key\tGlacier Key\tIdentifier")
+        for row in rows:
+            print("{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}\t{8}".format(
+                row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8]))
+        print('-' * 76)
+        print("{0} rows".format(len(rows)))
+    except (sqlite3.Error, RuntimeError) as err:
+        print(err)
+    finally:
+        c.close()
+
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Missing arg: bag_name")
-        print("Usage: python audit_001.py college.edu.name_of_bag.tar")
-        sys.exit()
     conn = sqlite3.connect('db/aptrust.db')
     conn.row_factory = sqlite3.Row
-    full_object_report(conn, sys.argv[1])
-    print('')
-    print('*' * 76)
-    print('')
-    unrecorded_file_report(conn, sys.argv[1])
+    if len(sys.argv) < 2:
+        #duplicate_file_report(conn)
+        missing_file_report(conn)
+    else:
+        full_object_report(conn, sys.argv[1])
+        print('')
+        print('*' * 76)
+        print('')
+        unrecorded_file_report(conn, sys.argv[1])
     conn.close()
