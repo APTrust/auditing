@@ -96,6 +96,110 @@ def print_summary_header(conn, bag_name):
     c.close()
 
 
+class FileStat:
+    def __init__(self, path):
+        self.path = path
+        self.fedoda_url = None
+        self.s3_keys = []
+        self.glacier_keys = []
+        self.has_error = False
+        self.report = ''
+    def add_s3_key(self, key):
+        self.s3_keys.append(key)
+    def add_glacier_key(self, key):
+        self.glacier_keys.append(key)
+    def url_suffix(self):
+        return self.fedora_url.split('/')[-1]
+    def print_report(self):
+        self.report += "Path\n  {0}\n".format(self.path)
+        self.report += "URL\n  {0}\n".format(self.fedora_url)
+        self._check_keys('S3', self.s3_keys)
+        self._check_keys('Glacier', self.glacier_keys)
+        if self.has_error:
+            print(self.report)
+        else:
+            print('[OK] {0} -> {1}'.format(self.path, self.fedora_url))
+        print('-' * 72)
+    def _check_keys(self, name, collection):
+        fedora_key = self.url_suffix()
+        fedora_key_found = False
+        self.report += "{0} Keys\n".format(name)
+        for key in collection:
+            arrow = "\n"
+            if key not in self.fedora_url:
+                arrow = "  <--- Extra\n"
+                self.has_error = True
+            if key == fedora_key:
+                fedora_key_found = True
+            self.report += "  {0} {1}".format(key, arrow)
+        if fedora_key_found == False:
+            self.report += "{0} <--- Fedora key missing\n".format(' ' * 40)
+            self.has_error = True
+
+def print_file_summary(conn, bag_name):
+    files = []
+    values = (bag_name,)
+    c = conn.cursor()
+
+    print("Full report for bag {0}".format(bag_name))
+
+    query = """select o.error_message from audit_001_objects o where o.key = ?"""
+    c.execute(query, values)
+    error_message = c.fetchone()[0]
+    print("Error: {0}".format(error_message))
+
+    # Get a list of files that were unpacked from the tar bag.
+    query = """select file_path from ingest_unpacked_files iuf
+    inner join ingest_tar_results itr on itr.id = iuf.ingest_tar_result_id
+    inner join ingest_s3_files s3 on s3.ingest_record_id = itr.ingest_record_id
+    where s3.key = ? and iuf.file_path like 'data/%'"""
+    c.execute(query, values)
+    rows = c.fetchall()
+    for row in rows:
+        files.append(FileStat(row[0]))
+
+
+    bag_name_without_tar = bag_name.rstrip('.tar')
+
+    # For each file...
+    for filestat in files:
+        # ... get the URL stored in Fedora
+        query = """select f.fedora_file_uri from audit_001_files f
+        inner join ingest_s3_files s3 on s3.ingest_record_id = f.ingest_record_id
+        where s3.key = ? and f.gf_file_path = ?"""
+        values = (bag_name, filestat.path)
+        c.execute(query, values)
+        filestat.fedora_url = c.fetchone()[0]
+
+        # ... get the keys stored in S3
+        query = """select k.name, m2.value from s3_keys k
+        inner join s3_meta m on m.key_id = k.id
+        inner join s3_meta m2 on m2.key_id = k.id
+        where m.name='bag' and k.bucket='aptrust.preservation.storage'
+        and m.value = ? and m2.name='bagpath' and m2.value = ?"""
+        values = (bag_name_without_tar, filestat.path)
+        c.execute(query, values)
+        rows = c.fetchall()
+        for row in rows:
+            filestat.add_s3_key(row[0])
+
+        # ... get the keys stored in Glacier
+        query = """select k.name, m2.value from s3_keys k
+        inner join s3_meta m on m.key_id = k.id
+        inner join s3_meta m2 on m2.key_id = k.id
+        where m.name='bag' and k.bucket='aptrust.preservation.oregon'
+        and m.value = ? and m2.name='bagpath' and m2.value = ?"""
+        values = (bag_name_without_tar, filestat.path)
+        c.execute(query, values)
+        rows = c.fetchall()
+        for row in rows:
+            filestat.add_glacier_key(row[0])
+
+        filestat.print_report()
+
+    c.close()
+
+
 def unrecorded_file_report(conn, bag_name):
     print("Unrecorded file report for bag {0}".format(bag_name))
     query = """select
@@ -204,9 +308,10 @@ if __name__ == "__main__":
         #duplicate_file_report(conn)
         missing_file_report(conn)
     else:
-        full_object_report(conn, sys.argv[1])
-        print('')
-        print('*' * 76)
-        print('')
-        unrecorded_file_report(conn, sys.argv[1])
+        #full_object_report(conn, sys.argv[1])
+        #print('')
+        #print('*' * 76)
+        #print('')
+        #unrecorded_file_report(conn, sys.argv[1])
+        print_file_summary(conn, sys.argv[1])
     conn.close()
