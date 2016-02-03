@@ -227,12 +227,13 @@ class FileStat:
                     self.fedora_url_should_be = self.fedora_url.replace(fedora_key, key)
         # Now, if we have an authoritative key, we want to delete the other
         # items from S3/Glacier.
-        for key, locations in self.aws_keys.iteritems():
-            if key not in self.fedora_url_should_be:
-                if 's3' in locations:
-                    self.s3_keys_to_delete.append(key)
-                if 'glacier' in locations:
-                    self.glacier_keys_to_delete.append(key)
+        if self.fedora_url_should_be is not None:
+            for key, locations in self.aws_keys.iteritems():
+                if key not in self.fedora_url_should_be:
+                    if 's3' in locations:
+                        self.s3_keys_to_delete.append(key)
+                        if 'glacier' in locations:
+                            self.glacier_keys_to_delete.append(key)
 
 def report_on_all_files(conn):
     c = conn.cursor()
@@ -286,8 +287,9 @@ def print_file_summary(conn, bag_name):
         query = """select k.name, m2.value from s3_keys k
         inner join s3_meta m on m.key_id = k.id
         inner join s3_meta m2 on m2.key_id = k.id
-        where m.name='bag' and k.bucket='aptrust.preservation.storage'
-        and m.value = ? and m2.name='bagpath' and m2.value = ?"""
+        where k.bucket='aptrust.preservation.storage'
+        and m.name='bag' and m.value = ?
+        and m2.name='bagpath' and m2.value = ?"""
         values = (bag_name_without_tar, filestat.path)
         c.execute(query, values)
         rows = c.fetchall()
@@ -298,8 +300,9 @@ def print_file_summary(conn, bag_name):
         query = """select k.name, m2.value from s3_keys k
         inner join s3_meta m on m.key_id = k.id
         inner join s3_meta m2 on m2.key_id = k.id
-        where m.name='bag' and k.bucket='aptrust.preservation.oregon'
-        and m.value = ? and m2.name='bagpath' and m2.value = ?"""
+        where k.bucket='aptrust.preservation.oregon'
+        and m.name='bag' and m.value = ?
+        and m2.name='bagpath' and m2.value = ?"""
         values = (bag_name_without_tar, filestat.path)
         c.execute(query, values)
         rows = c.fetchall()

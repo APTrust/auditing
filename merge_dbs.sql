@@ -407,3 +407,4 @@ insert into s3_meta select * from s3.s3_meta;
 
 create unique index ix_s3_name_etag_bucket on s3_keys(name, etag, bucket);
 create index ix_s3_meta_key_id on s3_meta(key_id);
+create index ix_s3_meta_name_value on s3_meta(name, value);

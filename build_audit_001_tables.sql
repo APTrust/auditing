@@ -160,6 +160,8 @@ left join files f on f.identifier = o.object_identifier || '/' || uf.file_path
 where uf.file_path like 'data/%';
 
 
+create index ix_audit_001_files_ingest_record_id on audit_001_files(ingest_record_id);
+create index ix_audit_001_files_gf_file_path on audit_001_files(gf_file_path);
 
 
 create table audit_001_problem_files (
