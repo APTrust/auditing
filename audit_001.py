@@ -6,6 +6,7 @@
 #
 import sqlite3
 import sys
+import json
 
 
 def full_object_report(conn, bag_name):
@@ -96,73 +97,171 @@ def print_summary_header(conn, bag_name):
     c.close()
 
 
+class ObjectStat:
+    def __init__(self, bag_name, error_message):
+        self.bag_name = bag_name
+        self.error_message = error_message
+        self.files = []
+    def add_file(self, filestat):
+        filestat.check_keys()
+        self.files.append(filestat)
+    def _summarize(self):
+        self.total_size = 0
+        self.total_files = 0
+        self.files_not_ingested = 0
+        self.ingested_size = 0
+        self.bytes_not_ingested = 0
+        self.files_not_ingested = 0
+        self.totally_ok = 0
+        self.ok_but_needs_deletions = 0
+        self.no_url = 0
+        self.url_needs_change = 0
+        self.s3_deletion_files = 0
+        self.s3_deletion_keys = 0
+        self.glacier_deletion_files = 0
+        self.glacier_deletion_keys = 0
+        for f in self.files:
+            f.check_keys()
+            self.total_size += f.size
+            self.total_files += 1
+            self.ingested_size += f.size
+            if f.fedora_url is None:
+                self.no_url += 1
+                self.ingested_size -= f.size
+                self.bytes_not_ingested += f.size
+                self.files_not_ingested += 1
+            elif f.fedora_url == f.fedora_url_should_be:
+                if not f.s3_keys_to_delete and not f.glacier_keys_to_delete:
+                    self.totally_ok += 1
+                else:
+                    self.ok_but_needs_deletions += 1
+            else:
+                self.url_needs_change += 1
+            if f.s3_keys_to_delete:
+                self.s3_deletion_files += 1
+                self.s3_deletion_keys += len(f.s3_keys_to_delete)
+            if f.glacier_keys_to_delete:
+                self.glacier_deletion_files += 1
+                self.glacier_deletion_keys += len(f.glacier_keys_to_delete)
+
+    def to_hash(self):
+        self._summarize()
+        return {
+            'bag_name': self.bag_name,
+            'error_message': self.error_message,
+            'files': list(map(lambda f:f.to_hash(), self.files)),
+            'summary': {
+                'total_size': self.total_size,
+                'ingested_size': self.ingested_size,
+                'totally_ok': self.totally_ok,
+                'ok_but_needs_deletions': self.ok_but_needs_deletions,
+                'no_url': self.no_url,
+                'url_needs_change': self.url_needs_change,
+                's3_deletion_files': self.s3_deletion_files,
+                's3_deletion_keys': self.s3_deletion_keys,
+                'glacier_deletion_files': self.glacier_deletion_files,
+                'glacier_deletion_keys': self.glacier_deletion_keys
+            }
+        }
+
+
 class FileStat:
-    def __init__(self, path):
+    def __init__(self, path, size):
         self.path = path
-        self.fedoda_url = None
-        self.s3_keys = []
-        self.glacier_keys = []
-        self.has_error = False
-        self.report = ''
+        self.size = size
+        self.fedora_url = None
+        self.fedora_url_should_be = None
+        self.aws_keys = {}
+        self.key_to_keep = None
+        self.s3_keys_to_delete = []
+        self.glacier_keys_to_delete = []
     def add_s3_key(self, key):
-        self.s3_keys.append(key)
+        locations = self.aws_keys.get(key, [])
+        if len(locations) == 0:
+            self.aws_keys[key] = locations
+        self.aws_keys[key].append('s3')
     def add_glacier_key(self, key):
-        self.glacier_keys.append(key)
+        locations = self.aws_keys.get(key, [])
+        if len(locations) == 0:
+            self.aws_keys[key] = locations
+        self.aws_keys[key].append('glacier')
     def url_suffix(self):
         return self.fedora_url.split('/')[-1]
-    def print_report(self):
-        self.report += "Path\n  {0}\n".format(self.path)
-        self.report += "URL\n  {0}\n".format(self.fedora_url)
-        self._check_keys('S3', self.s3_keys)
-        self._check_keys('Glacier', self.glacier_keys)
-        if self.has_error:
-            print(self.report)
-        else:
-            print('[OK] {0} -> {1}'.format(self.path, self.fedora_url))
-        print('-' * 72)
-    def _check_keys(self, name, collection):
+    def to_hash(self):
+        self.check_keys()
+        return {
+            'path': self.path,
+            'fedora_url': self.fedora_url,
+            'fedora_url_should_be': self.fedora_url_should_be,
+            'aws_keys': self.aws_keys,
+            'key_to_keep': self.key_to_keep,
+            's3_keys_to_delete': self.s3_keys_to_delete,
+            'glacier_keys_to_delete': self.glacier_keys_to_delete,
+            'error_message': self.error_message
+        }
+    def check_keys(self):
+        if self.fedora_url is None:
+            return
+        self.key_to_keep = None
+        self.error_message = None
         fedora_key = self.url_suffix()
-        fedora_key_found = False
-        self.report += "{0} Keys\n".format(name)
-        for key in collection:
-            arrow = "\n"
-            if key not in self.fedora_url:
-                arrow = "  <--- Extra\n"
-                self.has_error = True
-            if key == fedora_key:
-                fedora_key_found = True
-            self.report += "  {0} {1}".format(key, arrow)
-        if fedora_key_found == False:
-            self.report += "{0} <--- Fedora key missing\n".format(' ' * 40)
-            self.has_error = True
+        # If the key in the Fedora URL is stored in both S3 and Glacier,
+        # keep that key and delete all others. For this file, storage
+        # was successful.
+        for key, locations in self.aws_keys.iteritems():
+            if key in self.fedora_url and 's3' in locations and 'glacier' in locations:
+                self.key_to_keep = key
+                self.fedora_url_should_be = self.fedora_url
+        # We have many cases where the storage URL includes a key that
+        # was stored in S3 but not Glacier... and then the item was
+        # stored again under a new key in both S3 and Glacier. For those
+        # items, switch the URL to the new key. We'll get rid of the old
+        # URL and the item in S3 it points to.
+        if self.key_to_keep is None:
+            for key, locations in self.aws_keys.iteritems():
+                if key not in self.fedora_url and 's3' in locations and 'glacier' in locations:
+                    self.key_to_keep = key
+                    self.fedora_url_should_be = self.fedora_url.replace(fedora_key, key)
+        # Now, if we have an authoritative key, we want to delete the other
+        # items from S3/Glacier.
+        for key, locations in self.aws_keys.iteritems():
+            if key not in self.fedora_url_should_be:
+                if 's3' in locations:
+                    self.s3_keys_to_delete.append(key)
+                if 'glacier' in locations:
+                    self.glacier_keys_to_delete.append(key)
+
 
 def print_file_summary(conn, bag_name):
-    files = []
+    filestat = None
     values = (bag_name,)
     c = conn.cursor()
 
-    print("Full report for bag {0}".format(bag_name))
+    #print("Full report for bag {0}".format(bag_name))
 
     query = """select o.error_message from audit_001_objects o where o.key = ?"""
     c.execute(query, values)
     error_message = c.fetchone()[0]
-    print("Error: {0}".format(error_message))
+    #print("Error: {0}".format(error_message))
+
+    obj_stat = ObjectStat(bag_name, error_message)
 
     # Get a list of files that were unpacked from the tar bag.
-    query = """select file_path from ingest_unpacked_files iuf
+    query = """select file_path, s3.size from ingest_unpacked_files iuf
     inner join ingest_tar_results itr on itr.id = iuf.ingest_tar_result_id
     inner join ingest_s3_files s3 on s3.ingest_record_id = itr.ingest_record_id
     where s3.key = ? and iuf.file_path like 'data/%'"""
     c.execute(query, values)
     rows = c.fetchall()
     for row in rows:
-        files.append(FileStat(row[0]))
+        filestat = FileStat(row[0], row[1])
+        obj_stat.add_file(filestat)
 
 
     bag_name_without_tar = bag_name.rstrip('.tar')
 
     # For each file...
-    for filestat in files:
+    for filestat in obj_stat.files:
         # ... get the URL stored in Fedora
         query = """select f.fedora_file_uri from audit_001_files f
         inner join ingest_s3_files s3 on s3.ingest_record_id = f.ingest_record_id
@@ -195,9 +294,8 @@ def print_file_summary(conn, bag_name):
         for row in rows:
             filestat.add_glacier_key(row[0])
 
-        filestat.print_report()
-
     c.close()
+    print(json.dumps(obj_stat.to_hash(), sort_keys=True, indent=2))
 
 
 def unrecorded_file_report(conn, bag_name):
