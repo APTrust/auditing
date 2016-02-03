@@ -120,11 +120,15 @@ class ObjectStat:
         self.s3_deletion_keys = 0
         self.glacier_deletion_files = 0
         self.glacier_deletion_keys = 0
+        self.keys_missing_from_s3 = 0
+        self.keys_missing_from_glacier = 0
         for f in self.files:
             f.check_keys()
             self.total_size += f.size
             self.total_files += 1
             self.ingested_size += f.size
+            self.keys_missing_from_s3 += len(f.s3_missing_keys)
+            self.keys_missing_from_glacier += len(f.glacier_missing_keys)
             if f.fedora_url is None:
                 self.no_url += 1
                 self.ingested_size -= f.size
@@ -163,7 +167,9 @@ class ObjectStat:
                 's3_deletion_files': self.s3_deletion_files,
                 's3_deletion_keys': self.s3_deletion_keys,
                 'glacier_deletion_files': self.glacier_deletion_files,
-                'glacier_deletion_keys': self.glacier_deletion_keys
+                'glacier_deletion_keys': self.glacier_deletion_keys,
+                'keys_missing_from_s3': self.keys_missing_from_s3,
+                'keys_missing_from_glacier': self.keys_missing_from_glacier
             }
         }
 
@@ -178,6 +184,8 @@ class FileStat:
         self.key_to_keep = None
         self.s3_keys_to_delete = []
         self.glacier_keys_to_delete = []
+        self.s3_missing_keys = []
+        self.glacier_missing_keys = []
     def add_s3_key(self, key):
         locations = self.aws_keys.get(key, [])
         if len(locations) == 0:
@@ -200,6 +208,8 @@ class FileStat:
             'key_to_keep': self.key_to_keep,
             's3_keys_to_delete': self.s3_keys_to_delete,
             'glacier_keys_to_delete': self.glacier_keys_to_delete,
+            's3_missing_keys': self.s3_missing_keys,
+            'glacier_missing_keys': self.glacier_missing_keys,
             'error_message': self.error_message
         }
     def check_keys(self):
@@ -225,15 +235,25 @@ class FileStat:
                 if key not in self.fedora_url and 's3' in locations and 'glacier' in locations:
                     self.key_to_keep = key
                     self.fedora_url_should_be = self.fedora_url.replace(fedora_key, key)
+
+        # We hit this case when we have the key stored in S3 but not in Glacier.
+        if self.fedora_url_should_be is None:
+            self.fedora_url_should_be = self.fedora_url
+
         # Now, if we have an authoritative key, we want to delete the other
         # items from S3/Glacier.
-        if self.fedora_url_should_be is not None:
-            for key, locations in self.aws_keys.iteritems():
-                if key not in self.fedora_url_should_be:
-                    if 's3' in locations:
-                        self.s3_keys_to_delete.append(key)
-                        if 'glacier' in locations:
-                            self.glacier_keys_to_delete.append(key)
+        for key, locations in self.aws_keys.iteritems():
+            if key not in self.fedora_url_should_be:
+                if 's3' in locations:
+                    self.s3_keys_to_delete.append(key)
+                if 'glacier' in locations:
+                    self.glacier_keys_to_delete.append(key)
+            else: # key matches URL
+                if 's3' not in locations:
+                    self.s3_missing_keys.append(key)
+                if 'glacier' not in locations:
+                    self.glacier_missing_keys.append(key)
+
 
 def report_on_all_files(conn):
     c = conn.cursor()
