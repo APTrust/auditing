@@ -152,7 +152,10 @@ class ObjectStat:
             'files': list(map(lambda f:f.to_hash(), self.files)),
             'summary': {
                 'total_size': self.total_size,
+                'total_files': self.total_files,
+                'files_not_ingested': self.files_not_ingested,
                 'ingested_size': self.ingested_size,
+                'bytes_not_ingested': self.bytes_not_ingested,
                 'totally_ok': self.totally_ok,
                 'ok_but_needs_deletions': self.ok_but_needs_deletions,
                 'no_url': self.no_url,
@@ -231,18 +234,27 @@ class FileStat:
                 if 'glacier' in locations:
                     self.glacier_keys_to_delete.append(key)
 
+def report_on_all_files(conn):
+    c = conn.cursor()
+    query = "select key from audit_001_objects"
+    index = 1
+    c.execute(query)
+    for row in c.fetchall():
+        bag_name = row[0]
+        sys.stderr.write("{0:4d}  {1}\n".format(index, bag_name))
+        print_file_summary(conn, bag_name)
+        index += 1
+    c.close()
 
 def print_file_summary(conn, bag_name):
     filestat = None
     values = (bag_name,)
     c = conn.cursor()
 
-    #print("Full report for bag {0}".format(bag_name))
 
     query = """select o.error_message from audit_001_objects o where o.key = ?"""
     c.execute(query, values)
     error_message = c.fetchone()[0]
-    #print("Error: {0}".format(error_message))
 
     obj_stat = ObjectStat(bag_name, error_message)
 
@@ -404,7 +416,8 @@ if __name__ == "__main__":
     conn.row_factory = sqlite3.Row
     if len(sys.argv) < 2:
         #duplicate_file_report(conn)
-        missing_file_report(conn)
+        #missing_file_report(conn)
+        report_on_all_files(conn)
     else:
         #full_object_report(conn, sys.argv[1])
         #print('')
