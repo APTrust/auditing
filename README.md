@@ -53,13 +53,13 @@ stored in S3 before being recorded.
 The fact that a bag record appears in the apt_record.json log means:
 
     * the bag was successfully downloaded and unpacked from the
-    receiving bucket
+      receiving bucket
     * the bag was valid, with all files present and all checksums
-    verified
+      verified
     * identifiers (UUIDs) were assigned to every file in the bag's
-    data directory
+      data directory
     * every file in the bag's data directory was successfully stored
-    in S3 long-term storage
+      in S3 long-term storage
 
 Each entry in the apt_record.json log contains all of the information
 necessary to create all of the PREMIS events associated with ingest.
@@ -69,14 +69,19 @@ recording failure implies a few possibilities:
 
     * the intellectual object may not be recorded in Fedora
     * some or all of the object's generic files may not be recorded
-    in Fedora
+      in Fedora
     * some or all of the object's generic files may not have been
-    copied to Glacier, because the Fedora recording error stops
-    further processing, and copying to Glacier is the last step
-    of the ingest process (after Fedora recording)
+      copied to Glacier, because the Fedora recording error stops
+      further processing, and copying to Glacier is the last step
+      of the ingest process (after Fedora recording)
 
 
 ## Building aptrust.db
+
+The auditing database includes information collected from a number of
+sources. It's fairly large (starting at 2GB), so you probably want to
+pull all the data down to your local machine, where you have plenty
+of CPU and memory to run queries.
 
 1. Dump data from Fedora into JSON format by running the following rake
 tasks on the live server:
@@ -122,10 +127,16 @@ sqlite3 db/aptrust.db < merge_dbs.sql
 At this point, you will have all of the necessary raw audit tables
 in aptrust.db, and they will be indexed for fast querying.
 
-8. This step is specific to our first audit, but you can use it as a
-pattern for future audits, which may require their own special SQL tables.
-Run the following command to build custom audit tables:
+## Custom Audit Tables
+
+You may need to build custom tables for your specific audit. If so,
+take a look at build_audit_001_tables.sql for an example of how to
+do that. For the first audit, the following command builds the
+custom audit tables:
 
 ```
 sqlite3 db/aptrust.db < build_audit_001_tables.sql
 ```
+
+The script audit_001.py gleans information from those tables to
+create a list of actions to fix errors uncovered by the audit.
