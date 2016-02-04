@@ -243,17 +243,3 @@ and (glacier_key != gf_uuid or glacier_key != substr(fedora_file_uri, 55));
 
 update audit_001_problem_files set missing_glacier = 1
 where gf_needs_save = 1 and glacier_key is null;
-
-
-/*
-
-Count queries to start audit
-
-select count(*) from audit_001_files;
-select count(distinct(gf_identifier)) from audit_001_files;
-
-select count(*) from ingest_unpacked_files uf
-inner join audit_001_objects o on o.tar_result_id = uf.ingest_tar_result_id
-where uf.file_path like 'data/%';
-
-*/
