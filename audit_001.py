@@ -329,6 +329,99 @@ def build_summary(read_conn, write_conn, bag_name, output_type):
         save_to_db(write_conn, obj_stat)
 
 
+def save_to_db(write_conn, obj_stat):
+    bag_id = save_bag(write_conn, obj_stat.bag_name)
+    for filestat in obj_stat.files:
+        filestat.check_keys()
+        for uuid in filestat.s3_keys_to_delete:
+            save_key(write_conn,
+                     bag_id,
+                     'delete',
+                     's3',
+                     filestat.path,
+                     uuid)
+        for uuid in filestat.glacier_keys_to_delete:
+            save_key(write_conn,
+                     bag_id,
+                     'delete',
+                     'glacier',
+                     filestat.path,
+                     uuid)
+        for uuid in filestat.s3_missing_keys:
+            save_key(write_conn,
+                     bag_id,
+                     'add',
+                     's3',
+                     filestat.path,
+                     uuid)
+        for uuid in filestat.glacier_missing_keys:
+            save_key(write_conn,
+                     bag_id,
+                     'add',
+                     'glacier',
+                     filestat.path,
+                     uuid)
+        if filestat.fedora_url != filestat.fedora_url_should_be:
+            save_url(write_conn,
+                     bag_id,
+                     filestat.fedora_url,
+                     filestat.fedora_url_should_be)
+
+def save_bag(write_conn, bag_name):
+    bag_id = None
+    query = "select id from bags where name=?"
+    values = (bag_name,)
+    cursor = write_conn.cursor()
+    cursor.execute(query, values)
+    result = cursor.fetchone()
+    if result and result[0]:
+        bag_id = result[0]
+    if bag_id == None:
+        statement = "insert into bags(name) values (?)"
+        cursor.execute(statement, values)
+        write_conn.commit()
+        bag_id = cursor.lastrowid
+    cursor.close()
+    return bag_id
+
+def save_key(write_conn, bag_id, action, storage, file_path, key):
+    key_id = None
+    query = """select id from aws_files where bag_id=? and action=?
+    and storage=? and file_path=? and key=?"""
+    values = (bag_id, action, storage, file_path, key)
+    cursor = write_conn.cursor()
+    cursor.execute(query, values)
+    result = cursor.fetchone()
+    if result and result[0]:
+        key_id = result[0]
+    if key_id == None:
+        statement = """insert into aws_files(bag_id, action,
+        storage, file_path, key) values (?,?,?,?,?)"""
+        cursor.execute(statement, values)
+        write_conn.commit()
+        bag_id = cursor.lastrowid
+    cursor.close()
+    return key_id
+
+
+def save_url(write_conn, bag_id, old_url, new_url):
+    url_id = None
+    query = "select id from urls where bag_id=?"
+    values = (bag_id,)
+    cursor = write_conn.cursor()
+    cursor.execute(query, values)
+    result = cursor.fetchone()
+    if result and result[0]:
+        url_id = result[0]
+    if url_id == None:
+        statement = """insert into urls(bag_id, old_url, new_url)
+        values (?,?,?)"""
+        values = (bag_id, old_url, new_url)
+        cursor.execute(statement, values)
+        write_conn.commit()
+        url_id = cursor.lastrowid
+    cursor.close()
+    return url_id
 
 
 def create_db(write_conn):
@@ -364,6 +457,7 @@ def create_db(write_conn):
 
     print("Creating table urls")
     statement = """create table urls(
+    id integer primary key autoincrement,
     bag_id integer not null,
     old_url varchar(255),
     new_url varchar(255),
@@ -379,18 +473,19 @@ def create_db(write_conn):
 
     print("Creating table aws_files")
     statement = """create table aws_files(
+    id integer primary key autoincrement,
     bag_id integer not null,
     action varchar(40) not null,
     storage varchar(20) not null,
-    generic_file varchar(255) not null,
+    file_path varchar(255) not null,
     key varchar(80) not null,
     FOREIGN KEY(bag_id)
     REFERENCES bags(id));"""
     write_conn.execute(statement)
     write_conn.commit()
 
-    print("Creating index ix_aws_files_generic_file on aws_files")
-    statement = "create index ix_aws_files_generic_file on aws_files(generic_file)"
+    print("Creating index ix_aws_files_file_path on aws_files")
+    statement = "create index ix_aws_files_file_path on aws_files(file_path)"
     write_conn.execute(statement)
     write_conn.commit()
 
@@ -411,8 +506,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run audit on ingest errors')
     parser.add_argument('--output', default='sql',
                         help="Output 'json' or 'sql'")
-    parser.add_argument("bag_name")
+    parser.add_argument("bag_name", nargs='?')
     args = parser.parse_args()
+
+    if args.output != 'sql' and args.output != 'json':
+        print("Option --output must be either 'json' or 'sql'")
+        sys.exit(0)
+    if args.output == 'sql' and args.bag_name:
+        print("I don't do sql for just one bag. Try omitting the bag name.")
+        sys.exit(0)
 
     read_conn = sqlite3.connect('db/aptrust.db')
     read_conn.row_factory = sqlite3.Row
@@ -420,6 +522,8 @@ if __name__ == "__main__":
     if args.bag_name:
         build_summary(read_conn, write_conn, args.bag_name, args.output)
     else:
+        if args.output == 'sql':
+            create_db(write_conn)
         report_on_all_files(read_conn, write_conn, args.output)
     read_conn.close()
     write_conn.close()
