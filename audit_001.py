@@ -364,6 +364,7 @@ def save_to_db(write_conn, obj_stat):
         if filestat.fedora_url != filestat.fedora_url_should_be:
             save_url(write_conn,
                      bag_id,
+                     filestat.path,
                      filestat.fedora_url,
                      filestat.fedora_url_should_be)
 
@@ -404,19 +405,19 @@ def save_key(write_conn, bag_id, action, storage, file_path, key):
     return key_id
 
 
-def save_url(write_conn, bag_id, old_url, new_url):
+def save_url(write_conn, bag_id, file_path, old_url, new_url):
     url_id = None
-    query = "select id from urls where bag_id=?"
-    values = (bag_id,)
+    query = "select id from urls where bag_id=? and file_path=?"
+    values = (bag_id, file_path,)
     cursor = write_conn.cursor()
     cursor.execute(query, values)
     result = cursor.fetchone()
     if result and result[0]:
         url_id = result[0]
     if url_id == None:
-        statement = """insert into urls(bag_id, old_url, new_url)
-        values (?,?,?)"""
-        values = (bag_id, old_url, new_url)
+        statement = """insert into urls(bag_id, file_path, old_url, new_url)
+        values (?,?,?,?)"""
+        values = (bag_id, file_path, old_url, new_url)
         cursor.execute(statement, values)
         write_conn.commit()
         url_id = cursor.lastrowid
@@ -459,6 +460,7 @@ def create_db(write_conn):
     statement = """create table urls(
     id integer primary key autoincrement,
     bag_id integer not null,
+    file_path varchar(255),
     old_url varchar(255),
     new_url varchar(255),
     FOREIGN KEY(bag_id)
@@ -466,8 +468,9 @@ def create_db(write_conn):
     write_conn.execute(statement)
     write_conn.commit()
 
-    print("Creating unique index ix_urls_bag_id on urls")
-    statement = "create unique index ix_urls_bag_id on urls(bag_id)"
+    print("Creating unique index ix_urls_bag_id_file_path on urls")
+    statement = """create unique index ix_urls_bag_id_file_path
+    on urls(bag_id, file_path)"""
     write_conn.execute(statement)
     write_conn.commit()
 
