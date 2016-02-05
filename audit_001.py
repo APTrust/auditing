@@ -13,6 +13,7 @@
 #
 # python audit_001.py > audit_output.json
 #
+import argparse
 import sqlite3
 import sys
 import json
@@ -234,32 +235,35 @@ class FileStat:
                 if 'glacier' not in locations:
                     self.glacier_missing_keys.append(key)
 
-def report_on_all_files(conn):
+def report_on_all_files(read_conn, write_conn, output_type):
     """
     Run a full report on all files belonging to all of the
     "failed" ingest bags.
     """
-    c = conn.cursor()
+    c = read_conn.cursor()
     query = "select key from audit_001_objects"
     index = 1
     c.execute(query)
     for row in c.fetchall():
         bag_name = row[0]
         sys.stderr.write("{0:4d}  {1}\n".format(index, bag_name))
-        print_file_summary(conn, bag_name)
+        build_summary(read_conn, write_conn, bag_name, output_type)
         index += 1
     c.close()
 
-def print_file_summary(conn, bag_name):
+def build_summary(read_conn, write_conn, bag_name, output_type):
     """
-    Prints a JSON summary to stdout (which you can redirect to a file)
-    for the specified bag. The summary includes information about every
-    file in that bag, including what ingest services knows about the file,
-    what Fedora knows about, and what S3 knows about.
+    Builds a summary of the state of an object and its files, including
+    any issues. If output_type is 'json', this prints a JSON summary to
+    stdout (which you can redirect to a file) for the specified bag.
+    The summary includes information about every file in that bag, including
+    what ingest services knows about the file, what Fedora knows about,
+    and what S3 knows about. If output_type is anything other than JSON,
+    this saves the data to the audit001_summary.db database.
     """
     filestat = None
     values = (bag_name,)
-    c = conn.cursor()
+    c = read_conn.cursor()
 
     query = """select o.error_message from audit_001_objects o where o.key = ?"""
     c.execute(query, values)
@@ -318,14 +322,104 @@ def print_file_summary(conn, bag_name):
             filestat.add_glacier_key(row[0])
 
     c.close()
-    print(json.dumps(obj_stat.to_hash(), sort_keys=True, indent=2))
+
+    if output_type == 'json':
+        print(json.dumps(obj_stat.to_hash(), sort_keys=True, indent=2))
+    else:
+        save_to_db(write_conn, obj_stat)
+
+
+
+
+def create_db(write_conn):
+    query = """SELECT name FROM sqlite_master WHERE type='table'
+    AND name='bags'"""
+    c = write_conn.cursor()
+    c.execute(query)
+    row = c.fetchone()
+    if row and row[0]:
+        print("Dropping old tables")
+        statement = "drop table bags"
+        write_conn.execute(statement)
+        write_conn.commit()
+        statement = "drop table urls"
+        write_conn.execute(statement)
+        write_conn.commit()
+        statement = "drop table aws_files"
+        write_conn.execute(statement)
+        write_conn.commit()
+
+
+    print("Creating table bags")
+    statement = """create table bags(
+    id integer primary key autoincrement,
+    name varchar(255))"""
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating unique index ix_bag_name_unique on bags")
+    statement = "create unique index ix_bag_name_unique on bags(name)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating table urls")
+    statement = """create table urls(
+    bag_id integer not null,
+    old_url varchar(255),
+    new_url varchar(255),
+    FOREIGN KEY(bag_id)
+    REFERENCES bags(id));"""
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating unique index ix_urls_bag_id on urls")
+    statement = "create unique index ix_urls_bag_id on urls(bag_id)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating table aws_files")
+    statement = """create table aws_files(
+    bag_id integer not null,
+    action varchar(40) not null,
+    storage varchar(20) not null,
+    generic_file varchar(255) not null,
+    key varchar(80) not null,
+    FOREIGN KEY(bag_id)
+    REFERENCES bags(id));"""
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating index ix_aws_files_generic_file on aws_files")
+    statement = "create index ix_aws_files_generic_file on aws_files(generic_file)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating index ix_aws_files_key on aws_files")
+    statement = "create index ix_aws_files_key on aws_files(key)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating index ix_aws_files_bag_id on urls")
+    statement = "create index ix_aws_files_bag_id on aws_files(bag_id)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    c.close()
 
 
 if __name__ == "__main__":
-    conn = sqlite3.connect('db/aptrust.db')
-    conn.row_factory = sqlite3.Row
-    if len(sys.argv) < 2:
-        report_on_all_files(conn)
+    parser = argparse.ArgumentParser(description='Run audit on ingest errors')
+    parser.add_argument('--output', default='sql',
+                        help="Output 'json' or 'sql'")
+    parser.add_argument("bag_name")
+    args = parser.parse_args()
+
+    read_conn = sqlite3.connect('db/aptrust.db')
+    read_conn.row_factory = sqlite3.Row
+    write_conn = sqlite3.connect('db/audit001_summary.db')
+    if args.bag_name:
+        build_summary(read_conn, write_conn, args.bag_name, args.output)
     else:
-        print_file_summary(conn, sys.argv[1])
-    conn.close()
+        report_on_all_files(read_conn, write_conn, args.output)
+    read_conn.close()
+    write_conn.close()
