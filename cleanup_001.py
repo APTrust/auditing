@@ -27,7 +27,8 @@ def copy_missing_files_to_glacier(conn, va_bucket, or_bucket):
     yet in Glacier.
     """
     c = conn.cursor()
-    query = "select id, key from aws_files where action = 'add'"
+    query = """select id, key from aws_files where action = 'add'
+    and action_completed_at is null"""
     c.execute(query)
     for row in c.fetchall():
         pk = row[0]
@@ -47,18 +48,21 @@ def copy_file(va_bucket, or_bucket, uuid):
     metadata = key.metadata
     header_data = {"Content-Type": key.content_type }
     print("    {0} to OR".format(uuid))
-    #or_bucket.copy_key(uuid, VA_BUCKET_NAME, uuid, headers=header_data, metadata=metadata)
+    or_bucket.copy_key(uuid, VA_BUCKET_NAME, uuid, headers=header_data, metadata=metadata)
 
 def mark_as_completed(conn, pk):
     """
     Put a timestamp in the database, so we can create a PREMIS event saying
     when the add/remove action was completed.
     """
+    cursor = conn.cursor()
     statement = "update aws_files set action_completed_at=? where id=?"
     now = datetime.utcnow()
     values = (now, pk,)
     print("    {0}").format(now.isoformat())
-    #conn.execute(query, values)
+    cursor.execute(statement, values)
+    conn.commit()
+    cursor.close()
 
 def delete_duplicate_files(conn, va_bucket):
     """
@@ -66,7 +70,8 @@ def delete_duplicate_files(conn, va_bucket):
     The duplicates are in S3 only. There are no duplicates in Glacier.
     """
     c = conn.cursor()
-    query = "select id, key from aws_files where action = 'delete'"
+    query = """select id, key from aws_files where action = 'delete'
+    and action_completed_at is null"""
     c.execute(query)
     for row in c.fetchall():
         pk = row[0]
@@ -83,9 +88,7 @@ def delete_file(va_bucket, uuid):
     """
     key = va_bucket.get_key(uuid)
     print("    {0} deleted from VA".format(uuid))
-    #va_bucket.delete_key(uuid)
-
-
+    va_bucket.delete_key(uuid)
 
 if __name__ == "__main__":
     s3 = S3Connection()
