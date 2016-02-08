@@ -29,6 +29,7 @@ class ObjectStat:
     def __init__(self, bag_name, error_message):
         self.bag_name = bag_name
         self.error_message = error_message
+        self.identifier = None
         self.files = []
 
     def add_file(self, filestat):
@@ -95,6 +96,7 @@ class ObjectStat:
         self._summarize()
         return {
             'bag_name': self.bag_name,
+            'identifier': self.identifier,
             'error_message': self.error_message,
             'files': list(map(lambda f:f.to_hash(), self.files)),
             'summary': {
@@ -126,6 +128,7 @@ class FileStat:
     def __init__(self, path, size):
         self.path = path
         self.size = size
+        self.identifier = None
         self.fedora_url = None
         self.fedora_url_should_be = None
         self.aws_keys = {}
@@ -177,6 +180,7 @@ class FileStat:
             'path': self.path,
             'fedora_url': self.fedora_url,
             'fedora_url_should_be': self.fedora_url_should_be,
+            'identifier': self.identifier,
             'aws_keys': self.aws_keys,
             'key_to_keep': self.key_to_keep,
             's3_keys_to_delete': self.s3_keys_to_delete,
@@ -265,14 +269,17 @@ def build_summary(read_conn, write_conn, bag_name, output_type):
     values = (bag_name,)
     c = read_conn.cursor()
 
-    query = """select o.error_message from audit_001_objects o where o.key = ?"""
+    query = """select o.error_message, object_identifier from
+    audit_001_objects o where o.key = ?"""
     c.execute(query, values)
-    error_message = c.fetchone()[0]
+    row = c.fetchone()
+    error_message = row[0]
 
     obj_stat = ObjectStat(bag_name, error_message)
+    obj_stat.identifier = row[1]
 
     # Get a list of files that were unpacked from the tar bag.
-    query = """select file_path, s3.size from ingest_unpacked_files iuf
+    query = """select iuf.file_path, s3.size from ingest_unpacked_files iuf
     inner join ingest_tar_results itr on itr.id = iuf.ingest_tar_result_id
     inner join ingest_s3_files s3 on s3.ingest_record_id = itr.ingest_record_id
     where s3.key = ? and iuf.file_path like 'data/%'"""
@@ -288,12 +295,14 @@ def build_summary(read_conn, write_conn, bag_name, output_type):
     # For each file...
     for filestat in obj_stat.files:
         # ... get the URL stored in Fedora
-        query = """select f.fedora_file_uri from audit_001_files f
+        query = query = """select f.fedora_file_uri, f.gf_identifier from audit_001_files f
         inner join ingest_s3_files s3 on s3.ingest_record_id = f.ingest_record_id
         where s3.key = ? and f.gf_file_path = ?"""
         values = (bag_name, filestat.path)
         c.execute(query, values)
-        filestat.fedora_url = c.fetchone()[0]
+        row = c.fetchone()
+        filestat.fedora_url = row[0]
+        filestat.identifier = row[1]
 
         # ... get the keys stored in S3
         query = """select k.name, m2.value from s3_keys k
@@ -330,7 +339,7 @@ def build_summary(read_conn, write_conn, bag_name, output_type):
 
 
 def save_to_db(write_conn, obj_stat):
-    bag_id = save_bag(write_conn, obj_stat.bag_name)
+    bag_id = save_bag(write_conn, obj_stat.bag_name, obj_stat.identifier)
     for filestat in obj_stat.files:
         filestat.check_keys()
         for uuid in filestat.s3_keys_to_delete:
@@ -339,6 +348,7 @@ def save_to_db(write_conn, obj_stat):
                      'delete',
                      's3',
                      filestat.path,
+                     filestat.identifier,
                      uuid)
         for uuid in filestat.glacier_keys_to_delete:
             save_key(write_conn,
@@ -346,6 +356,7 @@ def save_to_db(write_conn, obj_stat):
                      'delete',
                      'glacier',
                      filestat.path,
+                     filestat.identifier,
                      uuid)
         for uuid in filestat.s3_missing_keys:
             save_key(write_conn,
@@ -353,6 +364,7 @@ def save_to_db(write_conn, obj_stat):
                      'add',
                      's3',
                      filestat.path,
+                     filestat.identifier,
                      uuid)
         for uuid in filestat.glacier_missing_keys:
             save_key(write_conn,
@@ -360,15 +372,17 @@ def save_to_db(write_conn, obj_stat):
                      'add',
                      'glacier',
                      filestat.path,
+                     filestat.identifier,
                      uuid)
         if filestat.fedora_url != filestat.fedora_url_should_be:
             save_url(write_conn,
                      bag_id,
                      filestat.path,
+                     filestat.identifier,
                      filestat.fedora_url,
                      filestat.fedora_url_should_be)
 
-def save_bag(write_conn, bag_name):
+def save_bag(write_conn, bag_name, bag_identifier):
     bag_id = None
     query = "select id from bags where name=?"
     values = (bag_name,)
@@ -378,14 +392,15 @@ def save_bag(write_conn, bag_name):
     if result and result[0]:
         bag_id = result[0]
     if bag_id == None:
-        statement = "insert into bags(name) values (?)"
+        statement = "insert into bags(name, identifier) values (?, ?)"
+        values = (bag_name, bag_identifier,)
         cursor.execute(statement, values)
         write_conn.commit()
         bag_id = cursor.lastrowid
     cursor.close()
     return bag_id
 
-def save_key(write_conn, bag_id, action, storage, file_path, key):
+def save_key(write_conn, bag_id, action, storage, file_path, identifier, key):
     key_id = None
     query = """select id from aws_files where bag_id=? and action=?
     and storage=? and file_path=? and key=?"""
@@ -397,7 +412,9 @@ def save_key(write_conn, bag_id, action, storage, file_path, key):
         key_id = result[0]
     if key_id == None:
         statement = """insert into aws_files(bag_id, action,
-        storage, file_path, key) values (?,?,?,?,?)"""
+        action_completed_at, storage, file_path, identifier, key)
+        values (?,?,?,?,?,?,?)"""
+        values = (bag_id, action, None, storage, file_path, identifier, key)
         cursor.execute(statement, values)
         write_conn.commit()
         bag_id = cursor.lastrowid
@@ -405,7 +422,7 @@ def save_key(write_conn, bag_id, action, storage, file_path, key):
     return key_id
 
 
-def save_url(write_conn, bag_id, file_path, old_url, new_url):
+def save_url(write_conn, bag_id, file_path, identifier, old_url, new_url):
     url_id = None
     query = "select id from urls where bag_id=? and file_path=?"
     values = (bag_id, file_path,)
@@ -415,9 +432,9 @@ def save_url(write_conn, bag_id, file_path, old_url, new_url):
     if result and result[0]:
         url_id = result[0]
     if url_id == None:
-        statement = """insert into urls(bag_id, file_path, old_url, new_url)
-        values (?,?,?,?)"""
-        values = (bag_id, file_path, old_url, new_url)
+        statement = """insert into urls(bag_id, file_path, identifier,
+        old_url, new_url) values (?,?,?,?,?)"""
+        values = (bag_id, file_path, identifier, old_url, new_url)
         cursor.execute(statement, values)
         write_conn.commit()
         url_id = cursor.lastrowid
@@ -447,7 +464,8 @@ def create_db(write_conn):
     print("Creating table bags")
     statement = """create table bags(
     id integer primary key autoincrement,
-    name varchar(255))"""
+    name varchar(255) not null,
+    identifier varchar(255) not null)"""
     write_conn.execute(statement)
     write_conn.commit()
 
@@ -456,11 +474,17 @@ def create_db(write_conn):
     write_conn.execute(statement)
     write_conn.commit()
 
+    print("Creating unique index ix_bag_identifier_unique on bags")
+    statement = "create unique index ix_bag_identifier_unique on bags(identifier)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
     print("Creating table urls")
     statement = """create table urls(
     id integer primary key autoincrement,
     bag_id integer not null,
     file_path varchar(255),
+    identifier varchar(255) not null,
     old_url varchar(255),
     new_url varchar(255),
     FOREIGN KEY(bag_id)
@@ -474,13 +498,20 @@ def create_db(write_conn):
     write_conn.execute(statement)
     write_conn.commit()
 
+    print("Creating index ix_urls_identifier on urls")
+    statement = "create index ix_urls_identifier on urls(identifier)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
     print("Creating table aws_files")
     statement = """create table aws_files(
     id integer primary key autoincrement,
     bag_id integer not null,
     action varchar(40) not null,
+    action_completed_at datetime null,
     storage varchar(20) not null,
     file_path varchar(255) not null,
+    identifier varchar(255) not null,
     key varchar(80) not null,
     FOREIGN KEY(bag_id)
     REFERENCES bags(id));"""
@@ -499,6 +530,11 @@ def create_db(write_conn):
 
     print("Creating index ix_aws_files_bag_id on urls")
     statement = "create index ix_aws_files_bag_id on aws_files(bag_id)"
+    write_conn.execute(statement)
+    write_conn.commit()
+
+    print("Creating index ix_aws_files_identifier on aws_files")
+    statement = "create index ix_aws_files_identifier on aws_files(identifier)"
     write_conn.execute(statement)
     write_conn.commit()
 
